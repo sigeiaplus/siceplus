@@ -12,16 +12,80 @@
    E, antes de tudo, lerQR para identificar o caderno.
    ============================================================ */
 
-import { FOLHA, centrosMarcadores } from './geometria.js';
+import { FOLHA, MARCADOR, QR, centrosMarcadores, layoutCartao } from './geometria.js';
+
+const LETRAS = ['A', 'B', 'C', 'D', 'E'];
+
+/**
+ * Layout (posição em mm de cada número e bolinha) de uma avaliação.
+ * É o MESMO cálculo usado na impressão (cartao-svg.js → geometria.js).
+ * Lança erro se passar de 50 questões.
+ */
+export function layoutDeAvaliacao(questoes, numAlternativas = 5) {
+  return layoutCartao(questoes, numAlternativas, LETRAS.slice(0, numAlternativas));
+}
+
+/** Área (mm) do QR e a área oposta (QR girado 180°), usadas para descobrir a rotação da folha. */
+const AREA_QR = { x0: QR.x, y0: QR.y, x1: QR.x + QR.lado, y1: QR.y + QR.lado };
+const AREA_OPOSTA = {
+  x0: FOLHA.largura - AREA_QR.x1, y0: FOLHA.altura - AREA_QR.y1,
+  x1: FOLHA.largura - AREA_QR.x0, y1: FOLHA.altura - AREA_QR.y0,
+};
+/** Tolerâncias em função do marcador (7 mm): lado aceito de 0,74× a 1,29×. */
+const LADO_MIN_MM = MARCADOR.lado * 0.74, LADO_MAX_MM = MARCADOR.lado * 1.29;
 
 export const PX_POR_MM = 5;
 
 /** Limiares de preenchimento (0 = papel, 1 = totalmente preta). */
-export const LIMIAR = {
-  marcada: 0.26,   // a partir daqui conta como marcada
-  fraca: 0.13,     // entre fraca e marcada → pede conferência
-  dominancia: 0.6, // 2ª maior marca precisa ficar abaixo de 60% da 1ª
+/**
+ * Parâmetros de leitura (Plano B). Todos podem ser ajustados sem mexer no código:
+ * passe `params` para lerBolhas / processarCartao (ou use salvarParametros em omr.js).
+ *  - marcada / fraca: fração de preenchimento (0–1) para contar como marcada / marca fraca
+ *  - dominancia: 2ª marca ≥ esta fração da 1ª e também "marcada" → marcação dupla
+ *  - incerteza: 2ª marca ≥ esta fração da 1ª e ≥ `fraca` → leitura incerta (vai para conferência)
+ *  - raioAmostra: fração do raio da bolinha medida (0,62 = miolo, evita o contorno impresso)
+ *  - percentilPapel: percentil das bolinhas usado como "papel vazio" de referência
+ *  - minGrade: fração mínima de bolinhas com contorno achado (verificarGrade)
+ *  - maxLado: maior lado (px) da imagem na busca dos marcadores
+ *  - conferirBranco: true = questão em branco também pede conferência
+ */
+export const PARAMS_PADRAO = {
+  marcada: 0.32,
+  fraca: 0.13,
+  dominancia: 0.6,
+  incerteza: 0.35,
+  raioAmostra: 0.62,
+  percentilPapel: 0.75,
+  minGrade: 0.8,
+  maxLado: 1600,
+  conferirBranco: false,
 };
+
+/** Compatibilidade: só os limiares de decisão. */
+export const LIMIAR = {
+  marcada: PARAMS_PADRAO.marcada,
+  fraca: PARAMS_PADRAO.fraca,
+  dominancia: PARAMS_PADRAO.dominancia,
+};
+
+const FAIXAS = {
+  marcada: [0.05, 0.95], fraca: [0.01, 0.9], dominancia: [0.1, 1], incerteza: [0.05, 1],
+  raioAmostra: [0.3, 0.9], percentilPapel: [0.5, 0.95], minGrade: [0.3, 1], maxLado: [600, 4000],
+};
+
+/** Junta os parâmetros recebidos com os padrões, ignorando valores inválidos. */
+export function mesclarParams(p = {}) {
+  const r = { ...PARAMS_PADRAO };
+  for (const k of Object.keys(FAIXAS)) {
+    const v = Number(p?.[k]);
+    if (p && p[k] !== undefined && p[k] !== null && p[k] !== '' && Number.isFinite(v)) {
+      r[k] = Math.min(FAIXAS[k][1], Math.max(FAIXAS[k][0], v));
+    }
+  }
+  if (typeof p?.conferirBranco === 'boolean') r.conferirBranco = p.conferirBranco;
+  if (r.fraca >= r.marcada) { r.fraca = PARAMS_PADRAO.fraca; r.marcada = PARAMS_PADRAO.marcada; } // fraca sempre < marcada
+  return r;
+}
 
 /* ---------------- utilidades ---------------- */
 
@@ -209,9 +273,12 @@ function centroLocal(cv, cinza, cx, cy, janelaMm) {
   try {
     // Limiar fixo em relação ao papel da janela (Otsu confundiria a mesa cinza com tinta).
     const amostra = [];
-    const dados = roi.data, passo = roi.step ? roi.step[0] : roi.cols;
-    for (let y = 0; y < roi.rows; y += 2) for (let x = 0; x < roi.cols; x += 2) amostra.push(dados[y * passo + x]);
-    cv.threshold(roi, bin, (percentil(amostra, 0.9) || 255) * 0.42, 255, cv.THRESH_BINARY_INV);
+    // Atenção: em OpenCV.js o `data` de um recorte (roi) vem truncado; lê-se da imagem inteira.
+    const dados = cinza.data, passo = cinza.cols;
+    for (let y = 0; y < roi.rows; y += 2) for (let x = 0; x < roi.cols; x += 2) amostra.push(dados[(y0 + y) * passo + (x0 + x)]);
+    // Limiar fixo em relação ao papel da janela (42%): a mesa escura fica de fora do quadrado.
+    const limiarLocal = (percentil(amostra, 0.9) || 255) * 0.42;
+    cv.threshold(roi, bin, limiarLocal, 255, cv.THRESH_BINARY_INV);
     cv.findContours(bin, contornos, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
     let melhor = null;
     for (let i = 0; i < contornos.size(); i++) {
@@ -226,7 +293,7 @@ function centroLocal(cv, cinza, cx, cy, janelaMm) {
     const lado = Math.sqrt(melhor.a) / S;                       // mm
     const cheio = melhor.a / Math.max(melhor.rr.size.width * melhor.rr.size.height, 1e-6);
     const razao = melhor.rr.size.width / Math.max(melhor.rr.size.height, 1e-6);
-    if (lado < 5.2 || lado > 9 || cheio < 0.86 || razao < 0.8 || razao > 1.25) return null;
+    if (lado < LADO_MIN_MM || lado > LADO_MAX_MM || cheio < 0.86 || razao < 0.8 || razao > 1.25) return null;
     return { x: (x0 + melhor.m.m10 / melhor.m.m00) / S, y: (y0 + melhor.m.m01 / melhor.m.m00) / S };
   } finally {
     roi.delete(); bin.delete(); contornos.delete(); hier.delete();
@@ -276,7 +343,8 @@ export function alinharCartao(cv, imagem, cantos) {
       const w = aplicar(cinzaOrig, arr);
       // O QR (canto superior direito) é a região mais densa da folha. Se, depois de
       // endireitar, a densidade estiver no canto oposto, a folha está de cabeça para baixo.
-      const dA = densidadeTinta(cv, w, 142, 14, 172, 44), dB = densidadeTinta(cv, w, 14, 229, 44, 259);
+      const dA = densidadeTinta(cv, w, AREA_QR.x0, AREA_QR.y0, AREA_QR.x1, AREA_QR.y1);
+      const dB = densidadeTinta(cv, w, AREA_OPOSTA.x0, AREA_OPOSTA.y0, AREA_OPOSTA.x1, AREA_OPOSTA.y1);
       const pontos = dA - dB;
       if (!melhor || pontos > melhor.pontos) {
         if (melhor) melhor.w.delete();
@@ -334,9 +402,17 @@ function normalizarIluminacao(cv, cinza) {
 
 /**
  * Decide a alternativa de cada questão.
- * @returns {{ leituras: {numero:number, detectada:string|null, estado:string, preenchimento:Object}[], papel:number }}
+ *
+ * Estados: 'ok' (única marca firme), 'branco', 'fraca' (marca clara demais para confiar),
+ * 'multipla' (duas marcas firmes), 'incerta' (uma marca firme mas outra bem visível) e 'anulada'.
+ * REGRA: só o estado 'ok' preenche `detectada`. Nos estados duvidosos `detectada` fica null
+ * (nada é contado como resposta) e `confere` = true; a alternativa mais provável vai em `sugestao`
+ * só para ajudar a conferência manual.
+ *
+ * @param params  parâmetros parciais (ver PARAMS_PADRAO); também aceita o objeto LIMIAR antigo.
  */
-export function lerBolhas(cv, cinzaAlinhada, layout, limiar = LIMIAR) {
+export function lerBolhas(cv, cinzaAlinhada, layout, params = {}) {
+  const P = mesclarParams(params);
   const norm = normalizarIluminacao(cv, cinzaAlinhada);
   try {
     const { data, cols, rows } = norm;
@@ -344,7 +420,7 @@ export function lerBolhas(cv, cinzaAlinhada, layout, limiar = LIMIAR) {
 
     const medias = layout.bolhas.map((b) => {
       const cx = b.x * S, cy = b.y * S;
-      const r = (b.d * S) / 2 * 0.62;
+      const r = (b.d * S) / 2 * P.raioAmostra;
       let soma = 0, n = 0;
       const xa = Math.max(0, Math.floor(cx - r)), xb = Math.min(cols - 1, Math.ceil(cx + r));
       const ya = Math.max(0, Math.floor(cy - r)), yb = Math.min(rows - 1, Math.ceil(cy + r));
@@ -356,8 +432,8 @@ export function lerBolhas(cv, cinzaAlinhada, layout, limiar = LIMIAR) {
       return n ? soma / n : 255;
     });
 
-    // Referência: bolinha vazia (papel + letra impressa). O percentil 75 resiste a muitas marcas.
-    const papel = percentil(medias, 0.75) || 255;
+    // Referência: bolinha vazia (papel + letra impressa). O percentil resiste a muitas marcas.
+    const papel = percentil(medias, P.percentilPapel) || 255;
 
     const porQuestao = new Map();
     layout.bolhas.forEach((b, i) => {
@@ -367,22 +443,62 @@ export function lerBolhas(cv, cinzaAlinhada, layout, limiar = LIMIAR) {
     });
 
     const leituras = layout.numeros.map((q) => {
-      if (q.anulada) return { numero: q.numero, detectada: null, estado: 'anulada', preenchimento: {} };
+      if (q.anulada) {
+        return { numero: q.numero, detectada: null, estado: 'anulada', confere: false, sugestao: null, confianca: 1, preenchimento: {} };
+      }
       const alts = (porQuestao.get(q.numero) || []).slice().sort((a, b) => b.f - a.f);
       const preenchimento = Object.fromEntries(alts.map((a) => [a.alt, Number(a.f.toFixed(3))]));
       const [p1, p2] = alts;
-      if (!p1 || p1.f < limiar.fraca) return { numero: q.numero, detectada: null, estado: 'branco', preenchimento };
-      if (p1.f < limiar.marcada) return { numero: q.numero, detectada: null, estado: 'fraca', preenchimento };
-      if (p2 && p2.f >= limiar.marcada && p2.f >= p1.f * limiar.dominancia) {
-        return { numero: q.numero, detectada: null, estado: 'multipla', preenchimento };
+      const base = { numero: q.numero, detectada: null, sugestao: null, confere: false, preenchimento };
+      const confianca = p1 ? Number((p1.f - (p2 ? p2.f : 0)).toFixed(3)) : 0;
+
+      if (!p1 || p1.f < P.fraca) return { ...base, estado: 'branco', confere: P.conferirBranco, confianca };
+      if (p1.f < P.marcada) return { ...base, estado: 'fraca', confere: true, sugestao: p1.alt, confianca };
+      if (p2 && p2.f >= P.marcada && p2.f >= p1.f * P.dominancia) {
+        return { ...base, estado: 'multipla', confere: true, sugestao: p1.alt, confianca };
       }
-      return { numero: q.numero, detectada: p1.alt, estado: 'ok', preenchimento };
+      if (p2 && p2.f >= P.fraca && p2.f >= p1.f * P.incerteza) {
+        return { ...base, estado: 'incerta', confere: true, sugestao: p1.alt, confianca };
+      }
+      return { ...base, estado: 'ok', detectada: p1.alt, confianca };
     });
 
     return { leituras, papel };
   } finally {
     norm.delete();
   }
+}
+
+/**
+ * Confere se a grade do layout bate com o cartão fotografado: o contorno impresso de cada
+ * bolinha precisa aparecer na posição prevista. Pega cartão de outra versão (ex.: impresso
+ * antes da geometria v3) ou foto torta demais, em vez de ler lixo em silêncio.
+ * @returns {{ ok:boolean, razao:number }} razao = fração de bolinhas com contorno encontrado
+ */
+export function verificarGrade(cv, cinzaAlinhada, layout, minimo = PARAMS_PADRAO.minGrade) {
+  const { data, cols, rows } = cinzaAlinhada;
+  const S = PX_POR_MM;
+  const px = (x, y) => {
+    const xi = Math.round(x), yi = Math.round(y);
+    return xi < 0 || yi < 0 || xi >= cols || yi >= rows ? 255 : data[yi * cols + xi];
+  };
+  let boas = 0, total = 0;
+  const N = 24;
+  for (const b of layout.bolhas) {
+    const r = (b.d / 2) * S, cx = b.x * S, cy = b.y * S;
+    let angulosBons = 0;
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+      let anel = 255;
+      for (let d = -1; d <= 1; d++) anel = Math.min(anel, px(cx + (r + d) * ca, cy + (r + d) * sa));
+      const fora = px(cx + (r + 0.55 * S) * ca, cy + (r + 0.55 * S) * sa);
+      if (fora > 0 && (fora - anel) / fora > 0.06) angulosBons++;
+    }
+    total++;
+    if (angulosBons / N >= 0.5) boas++;   // o contorno aparece em pelo menos metade da volta
+  }
+  const razao = total ? boas / total : 0;
+  return { ok: razao >= minimo, razao: Number(razao.toFixed(3)) };
 }
 
 /* ---------------- Revisão visual ---------------- */
@@ -409,7 +525,7 @@ export function desenharRevisao(canvas, rgba, layout, leituras, larguraSaida = 7
     const l = estado.get(b.numero);
     if (!l) return;
     const marcada = l.detectada === b.alt;
-    const pend = ['multipla', 'fraca'].includes(l.estado) && (l.preenchimento[b.alt] || 0) >= LIMIAR.fraca;
+    const pend = ['multipla', 'fraca', 'incerta'].includes(l.estado) && (l.preenchimento[b.alt] || 0) >= LIMIAR.fraca;
     if (!marcada && !pend) return;
     ctx.beginPath();
     ctx.arc(b.x * S, b.y * S, (b.d * S) / 2 + 2, 0, Math.PI * 2);
@@ -417,6 +533,60 @@ export function desenharRevisao(canvas, rgba, layout, leituras, larguraSaida = 7
     ctx.strokeStyle = marcada ? '#1E9E4A' : '#F2B600';
     ctx.stroke();
   });
+}
+
+/**
+ * Lê o QR já na folha endireitada (recorte de ~36 mm, ampliado): bem mais robusto que
+ * procurar o QR na foto inteira, porque o cartão já está de frente e na escala certa.
+ * `rgbaAlinhada` é o Mat devolvido por alinharCartao().rgba. Retorna o texto ou null.
+ */
+export function lerQRNaFolha(cv, rgbaAlinhada) {
+  if (!cv.QRCodeDetector) return null;
+  const { novo, guardar, limpar } = coletor(cv);
+  try {
+    const S = PX_POR_MM, folga = 3;
+    const x0 = Math.max(0, Math.round((QR.x - folga) * S)), y0 = Math.max(0, Math.round((QR.y - folga) * S));
+    const x1 = Math.min(rgbaAlinhada.cols, Math.round((QR.x + QR.lado + folga) * S));
+    const y1 = Math.min(rgbaAlinhada.rows, Math.round((QR.y + QR.lado + folga) * S));
+    const roi = guardar(rgbaAlinhada.roi(new cv.Rect(x0, y0, x1 - x0, y1 - y0)));
+    const cinza = novo();
+    cv.cvtColor(roi, cinza, cv.COLOR_RGBA2GRAY);
+
+    const detector = new cv.QRCodeDetector();
+    try {
+      const tentar = (mat) => {
+        try {
+          const pts = new cv.Mat();
+          const t = detector.detectAndDecode(mat, pts);
+          pts.delete();
+          return t ? String(t).trim() : null;
+        } catch (e) { return null; }
+      };
+      for (const f of [3, 2, 4]) {
+        const grande = novo();
+        cv.resize(cinza, grande, new cv.Size(cinza.cols * f, cinza.rows * f), 0, 0, cv.INTER_CUBIC);
+        let t = tentar(grande);
+        if (t) return t;
+        const bin = novo();                                    // binarizado local: ajuda com sombra e desfoque
+        cv.adaptiveThreshold(grande, bin, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, impar(grande.cols / 6), 8);
+        t = tentar(bin);
+        if (t) return t;
+        const otsu = novo();
+        cv.GaussianBlur(grande, otsu, new cv.Size(3, 3), 0);
+        cv.threshold(otsu, otsu, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+        t = tentar(otsu);
+        if (t) return t;
+      }
+    } finally {
+      try { detector.delete(); } catch (_) { /* ok */ }
+    }
+    return null;
+  } catch (e) {
+    console.warn('[SICEP+] QR na folha:', e);
+    return null;
+  } finally {
+    limpar();
+  }
 }
 
 /* ---------------- QR Code do caderno ---------------- */
