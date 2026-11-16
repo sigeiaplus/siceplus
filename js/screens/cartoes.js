@@ -1,16 +1,18 @@
 import * as store from '../store.js';
-import { el, esc, icon, fmtData, fmtNota, badge } from '../ui.js';
+import { el, esc, icon, fmtData, badge } from '../ui.js';
+import { montarCartaoSvg } from '../leitor/cartao-svg.js';
+import { MAX_QUESTOES } from '../leitor/geometria.js';
 
-/** QR Code real (gerador local, MIT — js/lib/qrcode.js). */
-function qrSvg(texto) {
+/** QR Code real (gerador local, MIT — js/lib/qrcode.js). Devolve o objeto já montado. */
+function qrObjeto(texto) {
   try {
     const qr = window.qrcode(0, 'M');
     qr.addData(texto);
     qr.make();
-    return qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+    return qr;
   } catch (e) {
     console.warn('[SICEP+] QR Code:', e);
-    return `<span class="xs muted">QR indisponível</span>`;
+    return null;
   }
 }
 
@@ -23,68 +25,27 @@ export default function cartoes(params) {
   const root = el('<div class="stack"></div>');
 
   function folha(av) {
+    if (av.questoes.length > MAX_QUESTOES) {
+      return `<div class="alert err">${icon('info', 16)}<span>O cartão comporta no máximo ${MAX_QUESTOES} questões.</span></div>`;
+    }
     const aplicacao = store.aplicacaoDe(av, turmaId);
     const ctx = store.contextoAplicacao(aplicacao);
     const totalAlts = av.layout?.num_alternativas || 5;
-    const alts = store.ALTERNATIVAS.slice(0, totalAlts);
+    const letras = store.ALTERNATIVAS.slice(0, totalAlts);
     const codigo = av.layout?.codigo_caderno || 'SICEP-A';
-    const denso = av.questoes.length > 25;
-    const compacto = av.questoes.length > 40;
 
-    return `
-      <div class="sheet ${denso ? 'denso' : ''} ${compacto ? 'compacto' : ''}">
-        <span class="mk tl"></span><span class="mk tr"></span>
-        <span class="mk bl"></span><span class="mk br"></span>
-
-        <div class="sheet-top">
-          <div>
-            <div class="sheet-title">SICEP+</div>
-            <div class="sheet-sub">Cartão de respostas</div>
-          </div>
-          <div class="sheet-qr">
-            ${qrSvg(codigo)}
-            <span class="sheet-qr-code">${esc(codigo)}</span>
-          </div>
-        </div>
-
-        <div class="sheet-info">
-          <div><b>Escola:</b> ${esc(store.sessao()?.escola || '')}</div>
-          <div><b>Turma:</b> ${esc(ctx?.turma?.nome || '')}</div>
-          <div><b>Disciplina:</b> ${esc(ctx?.disciplina?.nome || '')}</div>
-          <div><b>Caderno:</b> ${esc(caderno)}</div>
-          <div><b>Avaliação:</b> ${esc(av.titulo)}</div>
-          <div><b>Data:</b> ${fmtData(av.data_aplicacao)}</div>
-          <div><b>Valor:</b> ${fmtNota(av.valor_total)} pontos</div>
-          <div><b>Questões:</b> ${av.questoes.length}</div>
-        </div>
-
-        <div class="sheet-fields">
-          <div class="sheet-line"><span class="lbl">NOME DO ALUNO</span><span class="ln"></span></div>
-          <div class="sheet-line">
-            <span class="lbl">TURMA</span><span class="ln" style="max-width:26%"></span>
-            <span class="lbl">MATRÍCULA</span><span class="ln" style="max-width:34%"></span>
-          </div>
-          <div class="sheet-line">
-            <span class="lbl">DATA</span><span class="ln" style="max-width:26%"></span>
-            <span class="lbl">ASSINATURA</span><span class="ln"></span>
-          </div>
-        </div>
-
-        <div class="sheet-answers">
-          ${av.questoes.map((q) => `
-            <div class="sheet-q">
-              <span class="n">${String(q.numero).padStart(2, '0')}</span>
-              ${q.anulada
-                ? '<span class="bubble" style="border-style:dashed;border-color:#888">X</span>'
-                : alts.map((a) => `<span class="bubble">${a}</span>`).join('')}
-            </div>`).join('')}
-        </div>
-
-        <div class="sheet-foot">
-          <span>Preencha uma única alternativa por questão, com caneta preta ou azul.</span>
-          <span>Caderno ${esc(caderno)} · ${esc(codigo)}</span>
-        </div>
-      </div>`;
+    const svg = montarCartaoSvg({
+      questoes: av.questoes,
+      letras,
+      escola: store.sessao()?.escola || '',
+      turma: ctx?.turma?.nome || '',
+      disciplina: ctx?.disciplina?.nome || '',
+      avaliacao: av.titulo,
+      data: fmtData(av.data_aplicacao),
+      caderno: caderno,
+      qr: qrObjeto(codigo),   // o conteúdo do QR é dado de leitura; não aparece escrito no cartão
+    });
+    return `<div class="sheet">${svg}</div>`;
   }
 
   function pintar() {

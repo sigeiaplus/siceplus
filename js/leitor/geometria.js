@@ -1,22 +1,35 @@
 /* ============================================================
    SICEP+ · Geometria do cartão de respostas
    ------------------------------------------------------------
-   Fonte única de verdade para IMPRESSÃO (cartoes.js) e LEITURA
+   Fonte única de verdade para IMPRESSÃO (cartao-svg.js) e LEITURA
    (leitor.js). Tudo em milímetros, na folha de 186 × 273 mm.
 
    Se mudar algo aqui, os cartões já impressos deixam de bater
    com a leitura: por isso o layout é versionado (GEOMETRIA_VERSAO).
+
+   v3: questões numeradas na vertical (01 02 / 03 04 / 05 06 ...),
+       até 10 por coluna e 5 colunas (50 questões), cabeçalho no alto.
    ============================================================ */
 
-export const GEOMETRIA_VERSAO = 2;
+export const GEOMETRIA_VERSAO = 3;
 
 export const FOLHA = { largura: 186, altura: 273 };
 
 /** Quadrados pretos de referência (um em cada canto). */
 export const MARCADOR = { lado: 7, recuo: 4 };
 
-/** Região onde ficam as questões. */
-export const REGIAO = { x0: 14, y0: 112, x1: 172, y1: 250 };
+/** Capacidade: o QR Code NÃO entra nessa conta. */
+export const MAX_POR_COLUNA = 10;
+export const MAX_COLUNAS = 5;
+export const MAX_QUESTOES = MAX_POR_COLUNA * MAX_COLUNAS;
+/** Mínimo de colunas usadas (6 questões → 3 colunas × 2 linhas). */
+export const COLUNAS_MIN = 3;
+
+/** Região onde ficam as questões (abaixo do cabeçalho, acima do rodapé). */
+export const REGIAO = { x0: 12, y0: 62, x1: 174, y1: 252 };
+
+/** QR Code, canto superior direito (o leitor usa esta área para achar a rotação). */
+export const QR = { x: 142, y: 14, lado: 30 };
 
 /** Centro de cada marcador, na ordem: superior-esq., superior-dir., inferior-dir., inferior-esq. */
 export function centrosMarcadores() {
@@ -30,37 +43,41 @@ export function centrosMarcadores() {
   ];
 }
 
-function colunasPara(n) {
-  if (n <= 25) return 2;
-  if (n <= 40) return 3;
-  return 4;
+/** Quantas colunas e linhas uma avaliação de n questões usa. */
+export function gradePara(n) {
+  if (n < 1) return { cols: 1, rows: 1 };
+  const cols = Math.min(MAX_COLUNAS, Math.max(Math.ceil(n / MAX_POR_COLUNA), Math.min(COLUNAS_MIN, n)));
+  const rows = Math.ceil(n / cols);
+  return { cols, rows };
 }
 
 /**
  * Calcula a posição (mm) de cada número e de cada bolinha.
+ * Numeração vertical: a coluna 1 recebe 01, 02, 03…, depois a coluna 2, etc.
  * @param {{numero:number, anulada?:boolean}[]} questoes
  * @param {number} numAlternativas  4 ou 5
  * @param {string[]} letras         ['A','B',...]
  */
 export function layoutCartao(questoes, numAlternativas, letras) {
   const n = questoes.length;
-  const cols = colunasPara(n);
-  const rows = Math.max(1, Math.ceil(n / cols));
+  if (n > MAX_QUESTOES) {
+    throw new Error(`O cartão comporta no máximo ${MAX_QUESTOES} questões (recebeu ${n}).`);
+  }
+  const { cols, rows } = gradePara(n);
   const largReg = REGIAO.x1 - REGIAO.x0;
   const altReg = REGIAO.y1 - REGIAO.y0;
 
-  const alturaLinha = Math.min(11, altReg / rows);
+  const alturaLinha = Math.min(14, altReg / rows);
   const larguraCol = largReg / cols;
-  const folga = cols === 2 ? 6 : cols === 3 ? 5 : 4;
-  const larguraNumero = cols === 2 ? 8 : cols === 3 ? 7 : 6;
-  const passo = (larguraCol - folga - larguraNumero - 1) / numAlternativas;
-  const diametro = Math.min(7.5, passo * 0.8, alturaLinha * 0.75);
+  const folga = 2.5;                                  // espaço entre colunas
+  const larguraNumero = cols >= 4 ? 5.5 : 7;
+  const passo = (larguraCol - folga - larguraNumero - 0.8) / numAlternativas;
+  const diametro = Math.min(6, passo * 0.82, alturaLinha * 0.7);
 
   const numeros = [];
   const bolhas = [];
 
   questoes.forEach((q, i) => {
-    // preenchimento por coluna: 1..rows na 1ª coluna, e assim por diante
     const col = Math.floor(i / rows);
     const lin = i % rows;
     const yc = REGIAO.y0 + alturaLinha * (lin + 0.5);
@@ -77,7 +94,7 @@ export function layoutCartao(questoes, numAlternativas, letras) {
       bolhas.push({
         numero: q.numero,
         alt: letras[a],
-        x: xCol + larguraNumero + 1 + passo * (a + 0.5),
+        x: xCol + larguraNumero + 0.8 + passo * (a + 0.5),
         y: yc,
         d: diametro,
       });
@@ -90,7 +107,9 @@ export function layoutCartao(questoes, numAlternativas, letras) {
     marcador: MARCADOR,
     marcadores: centrosMarcadores(),
     regiao: REGIAO,
+    qr: QR,
     colunas: cols,
+    linhas: rows,
     alturaLinha,
     diametro,
     numeros,

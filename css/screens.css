@@ -66,55 +66,13 @@
 .sheet {
   position: relative;
   width: 100%; max-width: 400px;
-  aspect-ratio: 1 / 1.414;
+  aspect-ratio: 186 / 273;
   background: #fff;
   border: 1px solid #B9BDC4;
   border-radius: 3px;
-  padding: 13% 8% 6%;
-  display: flex; flex-direction: column;
-  color: #101318;
-  font-size: 9px;
   overflow: hidden;
 }
-.sheet .mk { position: absolute; width: 16px; height: 16px; background: #101318; }
-.sheet .mk.tl { top: 9px; left: 9px; }
-.sheet .mk.tr { top: 9px; right: 9px; }
-.sheet .mk.bl { bottom: 9px; left: 9px; }
-.sheet .mk.br { bottom: 9px; right: 9px; }
-
-.sheet-top { display: flex; gap: 10px; align-items: flex-start; }
-.sheet-title { font-size: 13px; font-weight: 800; letter-spacing: -.02em; line-height: 1; }
-.sheet-sub { font-size: 7.5px; color: #444; margin-top: 3px; }
-.sheet-qr {
-  margin-left: auto; flex: none;
-  width: 74px; height: 74px;
-  border: 1.5px dashed #8A8F98; border-radius: 4px;
-  display: grid; place-items: center;
-  font-size: 6.5px; line-height: 1.2; text-align: center; color: #5A6068;
-  padding: 3px;
-}
-.sheet-info {
-  margin-top: 10px; padding: 7px 8px;
-  border: 1px solid #C9CDD3; border-radius: 3px;
-  display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px;
-  font-size: 7.5px; line-height: 1.35;
-}
-.sheet-info b { font-weight: 700; }
-.sheet-fields { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
-.sheet-line { display: flex; align-items: flex-end; gap: 6px; }
-.sheet-line .lbl { font-size: 6.5px; color: #555; white-space: nowrap; }
-.sheet-line .ln { flex: 1 1 auto; border-bottom: 1px solid #101318; height: 9px; }
-
-.sheet-answers { margin-top: 9px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 14px; flex: 1 1 auto; align-content: start; }
-.sheet-q { display: flex; align-items: center; gap: 3px; }
-.sheet-q .n { width: 13px; text-align: right; font-weight: 700; font-size: 7.5px; }
-.bubble {
-  width: 15px; height: 15px; border-radius: 50%;
-  border: 1px solid #101318;
-  display: grid; place-items: center;
-  font-size: 6.5px; line-height: 1; color: #101318;
-}
-.sheet-foot { margin-top: 8px; font-size: 6.5px; color: #555; display: flex; justify-content: space-between; gap: 8px; }
+.sheet svg { display: block; width: 100%; height: 100%; }
 
 .sheet-note { text-align: center; }
 
@@ -248,11 +206,6 @@
 .q-row.anulada { opacity: .72; }
 .q-row.anulada .q-num { background: var(--err-bg); color: var(--err); }
 
-/* ---------------- Cartão com muitas questões ---------------- */
-
-.sheet.denso .sheet-answers { grid-template-columns: repeat(3, 1fr); gap: 3px 10px; }
-.sheet.denso .bubble { width: 17px; height: 17px; font-size: 6px; }
-.sheet.denso .sheet-q .n { width: 14px; font-size: 7px; }
 
 .cam img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
@@ -302,14 +255,4 @@
   background: var(--ink); color: #fff; display: grid; place-items: center;
 }
 
-/* QR real no cartão */
-.sheet-qr { border: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px; }
-.sheet-qr svg { width: 66px; height: 66px; display: block; }
-.sheet-qr-code { font-size: 6px; line-height: 1.1; text-align: center; color: #333; word-break: break-all; max-width: 74px; }
 
-/* 41 a 50 questões: quatro colunas para não estourar a folha */
-.sheet.denso.compacto .sheet-answers { grid-template-columns: repeat(4, 1fr); gap: 2px 6px; }
-.sheet.denso.compacto .bubble { width: 12px; height: 12px; font-size: 5px; }
-.sheet.denso.compacto .sheet-q .n { width: 11px; font-size: 6px; }
-.sheet.denso.compacto .sheet-info { font-size: 6.5px; }
-.sheet.denso.compacto .sheet-qr svg { width: 52px; height: 52px; }

@@ -1,14 +1,18 @@
 /* ============================================================
    SICEP+ · Impressão dos cartões de respostas
+   ------------------------------------------------------------
+   A folha é um SVG de 186 × 273 mm (geometria.js). Na impressão
+   ela sai em tamanho real, sem escala: margem da página = 0 e a
+   folha centralizada, para os marcadores ficarem a 7 mm exatos.
    ============================================================ */
 
 @page {
   size: A4 portrait;
-  margin: 12mm;
+  margin: 0;
 }
 
 @media print {
-  body { background: #fff; }
+  html, body { background: #fff; margin: 0; padding: 0; }
 
   .sidenav,
   .appbar,
@@ -18,12 +22,12 @@
 
   .app { display: block; }
   .app-main { display: block; }
-  .page { display: block; max-width: none; padding: 0; }
+  .page { display: block; max-width: none; padding: 0; margin: 0; }
 
   .sheet-wrap {
     display: block;
     padding: 0;
-    margin: 0 auto;
+    margin: 0;
   }
 
   .sheet {
@@ -31,49 +35,15 @@
     max-width: 186mm;
     height: 273mm;
     aspect-ratio: auto;
+    margin: 12mm auto 0;
     border: 0;
     border-radius: 0;
-    padding: 22mm 16mm 12mm;
-    page-break-after: always;
-    break-after: page;
+    overflow: visible;
+    break-inside: avoid;
+    page-break-inside: avoid;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
 
-  .sheet:last-of-type { page-break-after: auto; break-after: auto; }
-
-  .sheet .sheet-title { font-size: 26pt; }
-  .sheet .sheet-sub { font-size: 9pt; }
-  .sheet .sheet-qr { width: 112px; height: 112px; font-size: 7pt; }
-  .sheet .sheet-info { font-size: 9pt; padding: 10px 12px; border-color: #101318; }
-  .sheet .sheet-fields { gap: 12px; margin-top: 14px; }
-  .sheet .sheet-line .lbl { font-size: 8pt; }
-  .sheet .sheet-line .ln { height: 16px; }
-
-  .sheet-answers {
-    margin-top: 16px;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 9px 26px;
-  }
-  .sheet .sheet-q .n { font-size: 9.5pt; width: 20px; }
-  .sheet .bubble { width: 30px; height: 30px; font-size: 8pt; }
-  .sheet .sheet-foot { font-size: 7.5pt; margin-top: 14px; }
-
-  .mk { width: 22px !important; height: 22px !important; }
-
-  /* 26 a 50 questões: três colunas e bolhas menores para caber em uma página */
-  .sheet.denso .sheet-answers {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 5px 16px;
-  }
-  .sheet.denso .bubble { width: 22px; height: 22px; font-size: 7pt; }
-  .sheet.denso .sheet-q .n { width: 15px; font-size: 8pt; }
-}
-
-/* 41 a 50 questões: quatro colunas na impressão */
-@media print {
-  .sheet .sheet-qr svg { width: 100%; height: 100%; }
-  .sheet.denso.compacto .sheet-answers { grid-template-columns: repeat(4, 1fr); gap: 3px 10px; }
-  .sheet.denso.compacto .bubble { width: 17px; height: 17px; font-size: 6pt; }
-  .sheet.denso.compacto .sheet-q .n { width: 13px; font-size: 7.5pt; }
+  .sheet svg { width: 186mm; height: 273mm; }
 }
