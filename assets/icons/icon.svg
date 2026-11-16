@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="SICEP+">
+  <rect width="512" height="512" rx="96" fill="#F2B600"/>
+  <rect x="88" y="120" width="336" height="272" rx="28" fill="#FFFFFF" opacity="0.96"/>
+  <g fill="#1F2430">
+    <circle cx="152" cy="196" r="14"/>
+    <circle cx="212" cy="196" r="14"/>
+    <circle cx="272" cy="196" r="14"/>
+    <circle cx="332" cy="196" r="14"/>
+    <circle cx="152" cy="256" r="14"/>
+    <circle cx="212" cy="256" r="14"/>
+    <circle cx="272" cy="256" r="14"/>
+    <circle cx="332" cy="256" r="14"/>
+    <circle cx="152" cy="316" r="14"/>
+    <circle cx="212" cy="316" r="14"/>
+    <circle cx="272" cy="316" r="14"/>
+    <circle cx="332" cy="316" r="14"/>
+  </g>
+  <circle cx="212" cy="196" r="14" fill="#F2B600"/>
+  <circle cx="332" cy="256" r="14" fill="#F2B600"/>
+  <circle cx="272" cy="316" r="14" fill="#F2B600"/>
+</svg>

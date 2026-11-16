@@ -1,0 +1,315 @@
+/* ============================================================
+   SICEP+ · Estilos específicos de telas
+   ============================================================ */
+
+/* ---------------- Avaliações ---------------- */
+
+.av-card { display: flex; flex-direction: column; gap: 8px; }
+.av-card .av-title { font-weight: 650; font-size: 15px; line-height: 1.3; }
+.av-card .av-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12.5px; color: var(--ink-2); }
+.av-card .av-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding-top: 4px; }
+.av-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--line-strong); }
+
+/* ---------------- Wizard de avaliação ---------------- */
+
+.wizard-head { display: flex; flex-direction: column; gap: 8px; }
+
+.q-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  align-items: start;
+}
+.q-row:first-child { border-top: 0; }
+.q-num {
+  width: 30px; height: 30px; border-radius: 8px;
+  display: grid; place-items: center;
+  background: var(--y-100); color: var(--y-700);
+  font-weight: 700; font-size: 13px;
+}
+.q-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.q-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+
+.valor-input { width: 88px; min-height: 38px; padding: 6px 10px; }
+.q-enunciado { min-height: 60px; font-size: 14px; }
+
+.saved-note {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--y-50); border: 1px solid var(--y-200);
+  border-radius: var(--r); padding: 12px 14px;
+  font-size: 13px; color: var(--ink-2);
+}
+.saved-note svg { flex: none; color: var(--y-700); margin-top: 1px; }
+
+/* ---------------- Detalhe da avaliação ---------------- */
+
+.kv-list { display: flex; flex-direction: column; }
+.kv-list > div {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 9px 0; border-top: 1px solid var(--line); font-size: 13.5px;
+}
+.kv-list > div:first-child { border-top: 0; }
+.kv-list dt, .kv-list .k { color: var(--ink-3); flex: none; }
+.kv-list .v { font-weight: 600; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+
+.gab-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.gab-table th, .gab-table td { text-align: left; padding: 7px 8px; border-top: 1px solid var(--line); }
+.gab-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); border-top: 0; }
+.gab-table td.g { font-weight: 700; color: var(--y-700); }
+
+/* ---------------- Cartão de respostas ---------------- */
+
+.sheet-wrap { display: flex; justify-content: center; padding: 4px 0 8px; }
+
+.sheet {
+  position: relative;
+  width: 100%; max-width: 400px;
+  aspect-ratio: 1 / 1.414;
+  background: #fff;
+  border: 1px solid #B9BDC4;
+  border-radius: 3px;
+  padding: 13% 8% 6%;
+  display: flex; flex-direction: column;
+  color: #101318;
+  font-size: 9px;
+  overflow: hidden;
+}
+.sheet .mk { position: absolute; width: 16px; height: 16px; background: #101318; }
+.sheet .mk.tl { top: 9px; left: 9px; }
+.sheet .mk.tr { top: 9px; right: 9px; }
+.sheet .mk.bl { bottom: 9px; left: 9px; }
+.sheet .mk.br { bottom: 9px; right: 9px; }
+
+.sheet-top { display: flex; gap: 10px; align-items: flex-start; }
+.sheet-title { font-size: 13px; font-weight: 800; letter-spacing: -.02em; line-height: 1; }
+.sheet-sub { font-size: 7.5px; color: #444; margin-top: 3px; }
+.sheet-qr {
+  margin-left: auto; flex: none;
+  width: 74px; height: 74px;
+  border: 1.5px dashed #8A8F98; border-radius: 4px;
+  display: grid; place-items: center;
+  font-size: 6.5px; line-height: 1.2; text-align: center; color: #5A6068;
+  padding: 3px;
+}
+.sheet-info {
+  margin-top: 10px; padding: 7px 8px;
+  border: 1px solid #C9CDD3; border-radius: 3px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px;
+  font-size: 7.5px; line-height: 1.35;
+}
+.sheet-info b { font-weight: 700; }
+.sheet-fields { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.sheet-line { display: flex; align-items: flex-end; gap: 6px; }
+.sheet-line .lbl { font-size: 6.5px; color: #555; white-space: nowrap; }
+.sheet-line .ln { flex: 1 1 auto; border-bottom: 1px solid #101318; height: 9px; }
+
+.sheet-answers { margin-top: 9px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 14px; flex: 1 1 auto; align-content: start; }
+.sheet-q { display: flex; align-items: center; gap: 3px; }
+.sheet-q .n { width: 13px; text-align: right; font-weight: 700; font-size: 7.5px; }
+.bubble {
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 1px solid #101318;
+  display: grid; place-items: center;
+  font-size: 6.5px; line-height: 1; color: #101318;
+}
+.sheet-foot { margin-top: 8px; font-size: 6.5px; color: #555; display: flex; justify-content: space-between; gap: 8px; }
+
+.sheet-note { text-align: center; }
+
+/* ---------------- Leitura (câmera) ---------------- */
+
+.cam {
+  position: relative; width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #14181D;
+  border-radius: var(--r);
+  overflow: hidden;
+  display: grid; place-items: center;
+  color: #C8CDD4;
+}
+.cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam .cam-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px; text-align: center; font-size: 12.5px; }
+.cam .guide { position: absolute; inset: 9%; border: 2px dashed rgba(242,182,0,.85); border-radius: 6px; pointer-events: none; }
+.cam .corner { position: absolute; width: 26px; height: 26px; border: 3px solid var(--y-500); pointer-events: none; }
+.cam .corner.tl { top: 6%; left: 6%; border-right: 0; border-bottom: 0; border-radius: 6px 0 0 0; }
+.cam .corner.tr { top: 6%; right: 6%; border-left: 0; border-bottom: 0; border-radius: 0 6px 0 0; }
+.cam .corner.bl { bottom: 6%; left: 6%; border-right: 0; border-top: 0; border-radius: 0 0 0 6px; }
+.cam .corner.br { bottom: 6%; right: 6%; border-left: 0; border-top: 0; border-radius: 0 0 6px 0; }
+.cam .torch {
+  position: absolute; right: 10px; bottom: 10px; z-index: 2;
+  width: 40px; height: 40px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(255,255,255,.92); color: #14181D; border: 0; cursor: pointer;
+}
+.cam .cam-badge {
+  position: absolute; left: 10px; top: 10px; z-index: 2;
+  background: rgba(20,24,29,.72); color: #fff;
+  padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
+}
+
+.flow { display: flex; flex-direction: column; gap: 0; }
+.flow-step { display: flex; gap: 12px; padding-bottom: 16px; position: relative; }
+.flow-step:not(:last-child)::before {
+  content: ""; position: absolute; left: 13px; top: 30px; bottom: 0; width: 2px; background: var(--line);
+}
+.flow-step.done:not(:last-child)::before { background: var(--y-300); }
+.flow-step .fs-num {
+  width: 28px; height: 28px; flex: none; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  background: var(--bg); border: 1.5px solid var(--line-strong); color: var(--ink-3);
+  z-index: 1;
+}
+.flow-step.done .fs-num { background: var(--y-500); border-color: var(--y-500); color: var(--y-ink); }
+.flow-step.current .fs-num { background: var(--surface); border-color: var(--y-600); color: var(--y-700); box-shadow: 0 0 0 3px var(--y-200); }
+.flow-step .fs-body { min-width: 0; padding-top: 3px; }
+.flow-step .fs-title { font-weight: 650; font-size: 13.5px; }
+.flow-step .fs-sub { font-size: 12px; color: var(--ink-3); }
+.flow-step.waiting { opacity: .45; }
+
+/* ---------------- Revisão de respostas ---------------- */
+
+.rev-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 0; border-top: 1px solid var(--line);
+}
+.rev-row:first-child { border-top: 0; }
+.rev-row .rev-n {
+  width: 26px; height: 26px; flex: none; border-radius: 7px;
+  display: grid; place-items: center; background: var(--bg); border: 1px solid var(--line);
+  font-size: 11.5px; font-weight: 700;
+}
+.rev-row .rev-n.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn); }
+.rev-row .rev-n.ok { background: var(--ok-bg); border-color: var(--ok-line); color: var(--ok); }
+.rev-row .rev-n.err { background: var(--err-bg); border-color: var(--err-line); color: var(--err); }
+.rev-row .rev-state { font-size: 11.5px; }
+
+.result-big { display: flex; align-items: baseline; gap: 6px; }
+.result-big .rn { font-size: 34px; font-weight: 750; letter-spacing: -.03em; }
+
+.alert {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 12px 13px; border-radius: var(--r);
+  font-size: 12.5px; line-height: 1.45;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink-2);
+}
+.alert svg { flex: none; margin-top: 1px; }
+.alert.warn { background: var(--warn-bg); border-color: var(--warn-line); color: #6B4F00; }
+.alert.err  { background: var(--err-bg);  border-color: var(--err-line);  color: var(--err); }
+.alert.ok   { background: var(--ok-bg);   border-color: var(--ok-line);   color: var(--ok); }
+.alert.y    { background: var(--y-50);    border-color: var(--y-200);     color: #6B4F00; }
+
+/* ---------------- Desempenho ---------------- */
+
+.perf {
+  height: 6px; border-radius: 999px; background: #EDEFF3;
+  overflow: hidden; margin-top: 6px;
+}
+.perf > span { display: block; height: 100%; border-radius: 999px; transition: width .25s ease; }
+
+/* ---------------- Grade de conferência ---------------- */
+
+.ans-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
+  gap: 6px;
+}
+.ans-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; padding: 7px 4px;
+  border: 1px solid var(--line-strong); border-radius: 8px;
+  background: var(--surface); color: var(--ink);
+  font: inherit; cursor: pointer;
+}
+.ans-tile .at-n { font-size: 10px; color: var(--ink-3); }
+.ans-tile .at-a { font-size: 14px; font-weight: 700; line-height: 1.1; }
+.ans-tile.ok { border-color: var(--ok-line); background: var(--ok-bg); color: var(--ok); }
+.ans-tile.ok .at-n { color: var(--ok); opacity: .75; }
+.ans-tile.pendente { border-color: var(--warn-line); background: var(--warn-bg); color: var(--warn); }
+.ans-tile.pendente .at-n { color: var(--warn); opacity: .8; }
+.ans-tile.anulada { border-style: dashed; background: var(--bg); color: var(--ink-3); }
+
+.ans-editor {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: 10px; padding: 12px;
+  border: 1px solid var(--y-300); border-radius: var(--r);
+  background: var(--y-50);
+}
+.ans-opt {
+  min-height: 40px; min-width: 46px; padding: 0 12px;
+  border: 1px solid var(--line-strong); border-radius: 8px;
+  background: var(--surface); color: var(--ink);
+  font: inherit; font-weight: 650; cursor: pointer;
+}
+.ans-opt.on { background: var(--y-500); border-color: var(--y-500); color: var(--y-ink); }
+
+/* Questão anulada no editor da avaliação */
+.q-row.anulada { opacity: .72; }
+.q-row.anulada .q-num { background: var(--err-bg); color: var(--err); }
+
+/* ---------------- Cartão com muitas questões ---------------- */
+
+.sheet.denso .sheet-answers { grid-template-columns: repeat(3, 1fr); gap: 3px 10px; }
+.sheet.denso .bubble { width: 17px; height: 17px; font-size: 6px; }
+.sheet.denso .sheet-q .n { width: 14px; font-size: 7px; }
+
+.cam img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ---------------- Leitura: fluxo (turma → aluno → cartão) ---------------- */
+
+.capture-head { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
+.capture-head .icon-btn {
+  width: 38px; height: 38px; flex: none;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); display: grid; place-items: center; cursor: pointer;
+}
+
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tab {
+  flex: 1; padding: 11px 8px; background: none; border: 0;
+  border-bottom: 2.5px solid transparent;
+  font: inherit; font-size: 13.5px; font-weight: 700; color: var(--ink-3); cursor: pointer;
+}
+.tab.on { color: var(--y-700); border-bottom-color: var(--y-500); }
+
+.search-box { position: relative; display: flex; align-items: center; }
+.search-box svg { position: absolute; left: 12px; color: var(--ink-3); pointer-events: none; }
+.search-box .input { padding-left: 38px; background: var(--bg); }
+
+.turma-row, .aluno-row, .inst-row {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 13px 12px; background: var(--surface);
+  border: 0; border-bottom: 1px solid var(--line);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.turma-row:last-child, .aluno-row:last-child, .inst-row:last-child { border-bottom: 0; }
+.turma-row:active, .aluno-row:active, .inst-row:active { background: var(--y-50); }
+
+.tr-check {
+  width: 24px; height: 24px; flex: none; display: grid; place-items: center;
+  border-radius: 50%; border: 1.5px solid var(--line-strong); color: var(--ok);
+}
+.tr-check.ok { border-color: var(--ok-line); background: var(--ok-bg); }
+.tr-nome, .al-nome { display: block; font-weight: 700; font-size: 14px; }
+.tr-sub, .al-sub { display: block; font-size: 12px; color: var(--ink-3); margin-top: 1px; }
+.tr-bars { display: flex; align-items: flex-end; gap: 3px; height: 22px; flex: none; }
+.tr-bars span { width: 4px; height: 100%; background: var(--line); border-radius: 2px; }
+.tr-bars span.on { background: #34A853; }
+.tr-cont { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.al-add {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  background: var(--ink); color: #fff; display: grid; place-items: center;
+}
+
+/* QR real no cartão */
+.sheet-qr { border: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px; }
+.sheet-qr svg { width: 66px; height: 66px; display: block; }
+.sheet-qr-code { font-size: 6px; line-height: 1.1; text-align: center; color: #333; word-break: break-all; max-width: 74px; }
+
+/* 41 a 50 questões: quatro colunas para não estourar a folha */
+.sheet.denso.compacto .sheet-answers { grid-template-columns: repeat(4, 1fr); gap: 2px 6px; }
+.sheet.denso.compacto .bubble { width: 12px; height: 12px; font-size: 5px; }
+.sheet.denso.compacto .sheet-q .n { width: 11px; font-size: 6px; }
+.sheet.denso.compacto .sheet-info { font-size: 6.5px; }
+.sheet.denso.compacto .sheet-qr svg { width: 52px; height: 52px; }
