@@ -30,7 +30,7 @@ export default function estadoScreen(estado, detalhe) {
     <div class="login">
       <div class="login-card">
         <div class="login-brand">
-          <span class="mark lg">S+</span>
+          <span class="mark lg"><img src="assets/icons/icon.svg" alt="" /></span>
           <div>
             <h1>SICEP+</h1>
             <p class="small muted">Correção escolar de provas por cartão de respostas</p>

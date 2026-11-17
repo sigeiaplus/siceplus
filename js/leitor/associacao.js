@@ -2,28 +2,59 @@
  * Lógica pura (sem DOM) para poder ser testada fora do navegador.
  */
 
+import { interpretarPayload, resumoQR } from './qr-caderno.js';
+import { GEOMETRIA_VERSAO } from './geometria.js';
+
 export const codigoDe = (av) => String(av?.layout?.codigo_caderno || 'SICEP-A').trim();
 export const igual = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
+/**
+ * O que o QR diz e que precisa bater com a avaliação escolhida.
+ * Cartões no formato antigo não trazem esses dados: aí só o código vale.
+ * @returns {string[]} lista de incompatibilidades (vazia = QR compatível)
+ */
+export function conflitosCartao(av, cartao) {
+  if (!cartao || !av) return [];
+  if (cartao.legado) return [];   // QR antigo: só o código identifica
+  const n = Array.isArray(av.questoes) ? av.questoes.length : 0;
+  const alts = Number(av.layout?.num_alternativas) || 5;
+  const fora = [];
+  if (cartao.geometria && cartao.geometria !== GEOMETRIA_VERSAO) {
+    fora.push(`o cartão foi impresso com o layout v${cartao.geometria} (o atual é v${GEOMETRIA_VERSAO})`);
+  }
+  if (cartao.questoes && cartao.questoes !== n) {
+    fora.push(`o cartão tem ${cartao.questoes} questões e a avaliação tem ${n}`);
+  }
+  if (cartao.alternativas && cartao.alternativas !== alts) {
+    fora.push(`o cartão tem ${cartao.alternativas} alternativas e a avaliação tem ${alts}`);
+  }
+  return fora;
+}
 
 /**
  * Decide o que o QR lido significa.
  * @param {string} texto  conteúdo do QR
  * @param {{avaliacoesDaTurma: object[], fixa: object|null}} ctx  `fixa` = avaliação escolhida à mão na aba Instrumentos
- * @returns {{tipo: 'vazio'}|{tipo:'ok', avaliacao:object}|{tipo:'escolha', candidatas:object[]}
- *          |{tipo:'outra', lido:string, esperado:string, avaliacao:object}|{tipo:'nenhuma', lido:string}}
+ * @returns {{tipo: 'vazio'}|{tipo:'ok', avaliacao:object, cartao:object, conflitos:string[], lido:string}
+ *          |{tipo:'escolha', candidatas:object[], cartao:object}
+ *          |{tipo:'outra', lido:string, esperado:string, avaliacao:object}
+ *          |{tipo:'nenhuma', lido:string}}
  */
 export function decidirQR(texto, { avaliacoesDaTurma, fixa }) {
-  const t = String(texto || '').trim();
-  if (!t) return { tipo: 'vazio' };
+  const p = interpretarPayload(texto);
+  const t = p.codigo;
+  if (!String(texto || '').trim() || !t) return { tipo: 'vazio' };
 
   if (fixa) {
-    if (!igual(codigoDe(fixa), t)) return { tipo: 'outra', lido: t, esperado: codigoDe(fixa), avaliacao: fixa };
-    return { tipo: 'ok', avaliacao: fixa };
+    if (!igual(codigoDe(fixa), t)) {
+      return { tipo: 'outra', lido: resumoQR(texto), esperado: codigoDe(fixa), avaliacao: fixa };
+    }
+    return { tipo: 'ok', avaliacao: fixa, cartao: p, conflitos: conflitosCartao(fixa, p), lido: t };
   }
   const candidatas = (avaliacoesDaTurma || []).filter((a) => igual(codigoDe(a), t));
-  if (!candidatas.length) return { tipo: 'nenhuma', lido: t };
-  if (candidatas.length > 1) return { tipo: 'escolha', candidatas };   // mesmo código em mais de uma avaliação: nunca adivinha
-  return { tipo: 'ok', avaliacao: candidatas[0] };
+  if (!candidatas.length) return { tipo: 'nenhuma', lido: resumoQR(texto) };
+  if (candidatas.length > 1) return { tipo: 'escolha', candidatas, cartao: p };   // mesmo código em mais de uma avaliação: nunca adivinha
+  return { tipo: 'ok', avaliacao: candidatas[0], cartao: p, conflitos: conflitosCartao(candidatas[0], p), lido: t };
 }
 
 /**

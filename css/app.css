@@ -47,6 +47,14 @@
 
 html { -webkit-text-size-adjust: 100%; }
 
+/* Celular: sem o realce/contorno azul que o navegador desenha ao tocar.
+   O foco por teclado continua visível (focus-visible), que é o que a acessibilidade exige. */
+html, body, a, button, input, select, textarea, label, [role="tab"], summary {
+  -webkit-tap-highlight-color: transparent;
+}
+:focus:not(:focus-visible) { outline: none; }
+:focus-visible { outline: 3px solid var(--y-300); outline-offset: 1px; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -119,6 +127,37 @@ img { max-width: 100%; display: block; }
   box-shadow: inset 0 -2px 0 rgba(0,0,0,.08);
 }
 .mark.lg { width: 52px; height: 52px; border-radius: 13px; font-size: 19px; }
+.mark img { width: 100%; height: 100%; display: block; border-radius: inherit; }
+
+/* ---------------- Carregamento inicial (esqueleto com rolagem) ---------------- */
+
+.boot {
+  min-height: 100dvh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 16px; padding: 24px;
+  background: var(--bg);
+}
+.boot-logo {
+  width: 52px; height: 52px; border-radius: 13px; overflow: hidden;
+  box-shadow: 0 6px 18px rgba(16, 24, 40, .12);
+  animation: boot-pulsa 1.6s ease-in-out infinite;
+}
+.boot-lines { width: min(260px, 70vw); display: flex; flex-direction: column; gap: 9px; }
+.boot-lines span {
+  display: block; height: 11px; border-radius: 999px;
+  background: linear-gradient(90deg, #E8EAEF 0%, #F4F5F8 35%, #E8EAEF 70%, #E8EAEF 100%);
+  background-size: 220% 100%;
+  animation: boot-rolagem 1.15s linear infinite;
+}
+.boot-lines span:nth-child(2) { width: 78%; animation-delay: .09s; }
+.boot-lines span:nth-child(3) { width: 56%; animation-delay: .18s; }
+.boot-txt { font-size: 12.5px; color: var(--ink-3); }
+
+@keyframes boot-rolagem { to { background-position: -220% 0; } }
+@keyframes boot-pulsa { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@media (prefers-reduced-motion: reduce) {
+  .boot-lines span, .boot-logo { animation: none; }
+}
 
 /* ---------------- Navegação ---------------- */
 

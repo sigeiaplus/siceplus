@@ -12,7 +12,10 @@
    E, antes de tudo, lerQR para identificar o caderno.
    ============================================================ */
 
-import { FOLHA, MARCADOR, QR, centrosMarcadores, layoutCartao } from './geometria.js';
+import {
+  FOLHA, MARCADOR, QR, MAX_COLUNAS, MAX_POR_COLUNA, centrosMarcadores, layoutCartao,
+} from './geometria.js';
+import { interpretarPayload } from './qr-caderno.js';
 
 const LETRAS = ['A', 'B', 'C', 'D', 'E'];
 
@@ -21,9 +24,12 @@ const LETRAS = ['A', 'B', 'C', 'D', 'E'];
  * É o MESMO cálculo usado na impressão (cartao-svg.js → geometria.js).
  * Lança erro se passar de 50 questões.
  */
-export function layoutDeAvaliacao(questoes, numAlternativas = 5) {
-  return layoutCartao(questoes, numAlternativas, LETRAS.slice(0, numAlternativas));
+export function layoutDeAvaliacao(questoes, numAlternativas = 5, grade = null) {
+  return layoutCartao(questoes, numAlternativas, LETRAS.slice(0, numAlternativas), grade);
 }
+
+/** Letras usadas pelo cartão (A…E), na mesma ordem da impressão. */
+export const LETRAS_CARTAO = LETRAS.slice();
 
 /** Área (mm) do QR e a área oposta (QR girado 180°), usadas para descobrir a rotação da folha. */
 const AREA_QR = { x0: QR.x, y0: QR.y, x1: QR.x + QR.lado, y1: QR.y + QR.lado };
@@ -215,11 +221,20 @@ export function detectarMarcadores(cv, imagem, { maxLado = 1600 } = {}) {
     if (!melhorQuad) return { ok: false, cantos: null, achados: candidatos.length };
     const escolhidos = melhorQuad.grupo;
 
+    // Distância do marcador mais próximo da borda da FOTO (fração do menor lado).
+    // Perto de zero = a foto cortou a folha (o marcador está na beirada).
+    const menorLado = Math.min(W, H);
+    const margem = Math.min(...escolhidos.map((p) => Math.min(p.x, p.y, W - p.x, H - p.y))) / menorLado;
+    const ladoRel = (escolhidos.reduce((t, c) => t + c.lado, 0) / 4) / menorLado;
+
     return {
       ok: true,
       cantos: escolhidos.map((p) => ({ x: p.x / esc, y: p.y / esc })),
       achados: candidatos.length,
       ocupacao: melhorQuad.ar / area, // fração do quadro ocupada pelo cartão (0–1)
+      margem: Number(margem.toFixed(4)),
+      // Quadrado encostando na borda da foto = a folha foi cortada no enquadramento.
+      cortado: margem < ladoRel * 0.6,
     };
   } finally {
     limpar();
@@ -501,6 +516,39 @@ export function verificarGrade(cv, cinzaAlinhada, layout, minimo = PARAMS_PADRAO
   return { ok: razao >= minimo, razao: Number(razao.toFixed(3)) };
 }
 
+/**
+ * Grades (colunas × linhas) em que n questões cabem, da mais compacta para a mais larga.
+ * Serve para descobrir com que layout um cartão ANTIGO foi impresso quando a grade
+ * esperada não confere — em vez de simplesmente recusar dizendo "não bateu".
+ */
+export function gradesCandidatas(n) {
+  const out = [];
+  for (let rows = 1; rows <= MAX_POR_COLUNA; rows++) {
+    for (let cols = 1; cols <= MAX_COLUNAS; cols++) {
+      if (cols * rows >= n) out.push({ cols, rows });
+    }
+  }
+  return out;
+}
+
+/**
+ * Procura (na folha já endireitada) a grade que realmente aparece impressa.
+ * Só é chamado quando a grade esperada falhou: custa algumas leituras de pixel,
+ * mas evita dizer "cartão torto" quando o problema é a versão do cartão.
+ * @returns {{ razao:number, grade:{cols:number, rows:number}|null }}
+ */
+export function diagnosticarGrade(cv, cinzaAlinhada, { questoes, numAlternativas = 5, minimo = PARAMS_PADRAO.minGrade }) {
+  let melhor = { razao: 0, grade: null };
+  for (const grade of gradesCandidatas(questoes.length)) {
+    let layout;
+    try { layout = layoutDeAvaliacao(questoes, numAlternativas, grade); } catch (_) { continue; }
+    const r = verificarGrade(cv, cinzaAlinhada, layout, minimo);
+    if (r.razao > melhor.razao) melhor = { razao: r.razao, grade };
+    if (r.ok) return { razao: r.razao, grade };
+  }
+  return melhor;
+}
+
 /* ---------------- Revisão visual ---------------- */
 
 /**
@@ -595,7 +643,25 @@ export function lerQRNaFolha(cv, rgbaAlinhada) {
  * Lê o QR com OpenCV (várias escalas). Retorna o texto ou null.
  * `fallbackCanvas` (opcional) habilita o BarcodeDetector nativo quando existir.
  */
-export async function lerQR(cv, imagem, fallbackCanvas = null) {
+/** QR pelo leitor nativo do navegador (rápido e fora da thread principal quando existe). */
+async function lerQRNativo(canvas) {
+  if (!canvas || typeof BarcodeDetector === 'undefined') return null;
+  try {
+    const det = new BarcodeDetector({ formats: ['qr_code'] });
+    const achados = await det.detect(canvas);
+    return achados[0]?.rawValue ? String(achados[0].rawValue).trim() : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function lerQR(cv, imagem, fallbackCanvas = null, opcoes = {}) {
+  const rapido = !!opcoes.rapido;
+  // Leitura ao vivo: o detector nativo primeiro (não trava a pré-visualização).
+  if (rapido) {
+    const nativo = await lerQRNativo(fallbackCanvas);
+    if (nativo) return nativo;
+  }
   const { novo, guardar, limpar } = coletor(cv);
   try {
     if (cv.QRCodeDetector) {
@@ -605,7 +671,7 @@ export async function lerQR(cv, imagem, fallbackCanvas = null) {
 
       const detector = new cv.QRCodeDetector();
       try {
-        for (const escala of [1, 0.6, 0.35, 1.6]) {
+        for (const escala of (rapido ? [0.6] : [1, 0.6, 0.35, 1.6])) {
           const alvo = escala === 1 ? cinza : novo();
           if (escala !== 1) {
             cv.resize(cinza, alvo, new cv.Size(Math.round(cinza.cols * escala), Math.round(cinza.rows * escala)), 0, 0, escala < 1 ? cv.INTER_AREA : cv.INTER_CUBIC);
@@ -626,12 +692,7 @@ export async function lerQR(cv, imagem, fallbackCanvas = null) {
     limpar();
   }
 
-  if (fallbackCanvas && typeof BarcodeDetector !== 'undefined') {
-    try {
-      const det = new BarcodeDetector({ formats: ['qr_code'] });
-      const achados = await det.detect(fallbackCanvas);
-      if (achados[0]?.rawValue) return String(achados[0].rawValue).trim();
-    } catch (e) { console.warn('[SICEP+] BarcodeDetector:', e); }
-  }
+  const nativo = await lerQRNativo(fallbackCanvas);
+  if (nativo) return nativo;
   return null;
 }

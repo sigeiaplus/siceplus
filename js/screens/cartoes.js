@@ -1,7 +1,8 @@
 import * as store from '../store.js';
 import { el, esc, icon, fmtData, badge } from '../ui.js';
 import { montarCartaoSvg } from '../leitor/cartao-svg.js';
-import { MAX_QUESTOES } from '../leitor/geometria.js';
+import { MAX_QUESTOES, GEOMETRIA_VERSAO } from '../leitor/geometria.js';
+import { montarPayload } from '../leitor/qr-caderno.js';
 
 /** QR Code real (gerador local, MIT — js/lib/qrcode.js). Devolve o objeto já montado. */
 function qrObjeto(texto) {
@@ -33,6 +34,14 @@ export default function cartoes(params) {
     const totalAlts = av.layout?.num_alternativas || 5;
     const letras = store.ALTERNATIVAS.slice(0, totalAlts);
     const codigo = av.layout?.codigo_caderno || 'SICEP-A';
+    // O QR identifica a avaliação, o caderno, a versão do cartão e o tamanho da grade.
+    const payload = montarPayload({
+      codigo,
+      caderno,
+      questoes: av.questoes.length,
+      alternativas: totalAlts,
+      geometria: GEOMETRIA_VERSAO,
+    });
 
     const svg = montarCartaoSvg({
       questoes: av.questoes,
@@ -43,7 +52,7 @@ export default function cartoes(params) {
       avaliacao: av.titulo,
       data: fmtData(av.data_aplicacao),
       caderno: caderno,
-      qr: qrObjeto(codigo),   // o conteúdo do QR é dado de leitura; não aparece escrito no cartão
+      qr: qrObjeto(payload),   // o conteúdo do QR é dado de leitura; não aparece escrito no cartão
     });
     return `<div class="sheet">${svg}</div>`;
   }
@@ -86,7 +95,7 @@ export default function cartoes(params) {
         ${av ? `<div class="row wrap" style="gap:8px">
           ${badge(`${av.questoes.length} questões`)}
           ${badge(`${av.layout?.num_alternativas || 5} alternativas`)}
-          ${badge(`Layout ${av.layout?.codigo_caderno || 'SICEP-A'} v${av.layout?.versao || 1}`, 'y')}
+          ${badge(`Layout v${GEOMETRIA_VERSAO}`, 'y')}
         </div>` : ''}
       </div>
 
@@ -100,7 +109,8 @@ export default function cartoes(params) {
         <div class="alert y no-print">
           ${icon('info', 16)}
           <span>Na janela de impressão escolha <span class="strong">Salvar como PDF</span> para gerar o arquivo.
-          O QR Code já traz o código do caderno informado na avaliação — é ele que você lê ou digita no SICEP+.</span>
+          Imprima em <span class="strong">escala 100%</span> (sem “ajustar à página”) e não recorte dentro da moldura:
+          os 4 quadrados pretos dos cantos precisam sair inteiros. O QR Code já identifica a avaliação, o caderno e a versão do cartão.</span>
         </div>
       ` : `
         <div class="empty">

@@ -8,13 +8,23 @@
   <title>SICEP+ · Correção de provas</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="assets/icons/icon.svg" />
+  <link rel="icon" href="assets/icons/icon-256.png" type="image/png" sizes="256x256" />
+  <link rel="apple-touch-icon" href="assets/icons/icon-256.png" sizes="256x256" />
   <link rel="stylesheet" href="css/app.css" />
   <link rel="stylesheet" href="css/screens.css" />
   <link rel="stylesheet" href="css/print.css" />
 </head>
 <body>
-  <div id="app" class="app"></div>
+  <div id="app" class="app">
+    <!-- Carregamento inicial: um esqueleto simples com efeito de rolagem (substituído pelo app) -->
+    <div class="boot" role="status" aria-live="polite">
+      <div class="boot-logo"><img src="assets/icons/icon.svg" alt="" width="52" height="52" /></div>
+      <div class="boot-lines" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <p class="boot-txt">Carregando o SICEP+…</p>
+    </div>
+  </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <!-- Leitura de cartões: módulos pré-carregados em paralelo (o OpenCV, ~13 MB, NÃO entra aqui: carrega sob demanda em js/leitor/opencv-loader.js) -->
   <link rel="modulepreload" href="js/leitor/geometria.js" />
@@ -24,6 +34,7 @@
   <link rel="modulepreload" href="js/leitor/cartao-svg.js" />
   <link rel="modulepreload" href="js/leitor/camera.js" />
   <link rel="modulepreload" href="js/leitor/associacao.js" />
+  <link rel="modulepreload" href="js/leitor/qr-caderno.js" />
   <script src="js/lib/qrcode.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>

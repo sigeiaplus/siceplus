@@ -27,7 +27,7 @@ export default function login({ aoEntrar } = {}) {
     <div class="login">
       <aside class="login-hero">
         <div class="login-hero-top">
-          <span class="mark lg">S+</span>
+          <span class="mark lg"><img src="assets/icons/icon.svg" alt="" /></span>
           <span class="login-hero-name">SICEP<span>+</span></span>
         </div>
 
@@ -51,7 +51,7 @@ export default function login({ aoEntrar } = {}) {
       <main class="login-panel">
         <div class="login-card">
           <div class="login-brand-mobile">
-            <span class="mark lap">S+</span>
+            <span class="mark lg"><img src="assets/icons/icon.svg" alt="" /></span>
             <span class="login-hero-name">SICEP<span>+</span></span>
           </div>
 

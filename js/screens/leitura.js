@@ -4,10 +4,11 @@ import {
   barraDesempenho, desempenhoTexto,
 } from '../ui.js';
 import { carregarOpenCV } from '../leitor/opencv-loader.js';
-import { abrirCameraPrincipal, CameraErro } from '../leitor/camera.js';
+import { abrirCameraPrincipal, CameraErro, prepararCaptura, fotoEmAlta } from '../leitor/camera.js';
 import { codigoDe, igual, decidirQR, validarAssociacao as validarAssoc } from '../leitor/associacao.js';
+import { codigoDoQR } from '../leitor/qr-caderno.js';
 import { detectarMarcadores, lerQR, desenharRevisao } from '../leitor/leitor.js';
-import { processarCartao, carregarParametros, salvarParametros, restaurarParametros } from '../leitor/omr.js';
+import { processarCartao, carregarParametros, salvarParametros, restaurarParametros, descreverCartao } from '../leitor/omr.js';
 
 let stream = null;
 let tocha = false;
@@ -32,9 +33,14 @@ const ROTULO_ESTADO = {
   ok: 'Segura', branco: 'Em branco', fraca: 'Marca fraca', multipla: 'Marcação dupla', incerta: 'Marcação incerta',
 };
 
-/** Mensagens de bloqueio que o omr.js não traz (ou que ganham contexto aqui). */
-const MSG_BLOQUEIO = {
-  grade: 'As bolinhas deste cartão não batem com o layout da avaliação (cartão de outra versão, cortado ou torto). Nada foi lido.',
+/**
+ * O omr.js já explica cada bloqueio. Aqui só entra a orientação prática que depende
+ * da tela (o que o professor deve fazer agora).
+ */
+const DICA_BLOQUEIO = {
+  cartao_outra_versao: 'Imprima um cartão novo na aba Cartões — o cartão antigo não pode ser lido por esta versão do SICEP+.',
+  versao_diferente: 'Os cartões já impressos continuam válidos para a conferência manual, mas precisam ser reimpressos para a leitura automática.',
+  cartao_cortado: 'Dica: enquadre a folha inteira, deixando uma margem branca em volta dos 4 quadrados pretos.',
 };
 
 const dorme = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -52,6 +58,7 @@ export default function leitura(params) {
     avaliacaoId: params?.[0] || null,
     avaliacaoFixa: false,   // true quando o professor escolheu a avaliação na aba Instrumentos
     qrLido: false,          // QR do caderno já lido para a avaliação atual
+    cartaoQR: null,         // conteúdo do QR do cartão (versão, caderno, grade)
     modo: 'foto',           // 'foto' | 'manual'
     leituras: null,         // uma entrada por questão (ver montarLeituras)
     processo: null,         // último resultado de processarCartao()
@@ -200,13 +207,23 @@ export default function leitura(params) {
 
   /* ---- estado visual do overlay ---- */
 
+  // A pré-visualização chama isto a cada quadro: só mexe no DOM quando algo mudou de verdade.
+  let overlayAssinatura = '';
+
   function atualizarOverlay() {
     const qr = ov.passo === 'qr';
+    const assinatura = JSON.stringify([
+      qr, ov.marc, ov.ocupacao == null ? null : Math.round(ov.ocupacao * 10),
+      ov.processando, !!ov.cv, ov.cvErro, ov.camErro, ov.erro, ov.aviso,
+      ov.escolha ? ov.escolha.map((a) => a.id) : null,
+    ]);
+    if (assinatura === overlayAssinatura) return;
+    overlayAssinatura = assinatura;
     $cf('[data-cf-passo]').textContent = qr ? '1 de 2' : '2 de 2';
     $cf('[data-cf-instr]').textContent = qr ? 'LEIA O QR CODE DO CADERNO' : 'LEIA O CARTÃO RESPOSTA';
     $cf('[data-cf-sub]').textContent = qr
-      ? 'Aponte para o QR Code do caderno de prova.'
-      : 'Enquadre o cartão inteiro, com os 4 quadrados pretos visíveis.';
+      ? 'Aponte para o QR Code do cartão, de frente e com boa luz.'
+      : 'Mantenha a folha reta e os 4 quadrados pretos dos cantos dentro da moldura.';
     $cf('[data-cf-alvo]').className = 'cf-alvo ' + (qr ? 'qr' : 'cartao') + (!qr && ov.marc >= 2 ? ' ok' : '');
     // Passo do QR: o caderno só é identificado pela leitura do QR Code (sem digitar código).
     const bm = $cf('[data-cf-manual]');
@@ -223,8 +240,9 @@ export default function leitura(params) {
     else if (!ov.cv) { status = 'Carregando o leitor óptico…'; cls = 'busy'; }
     else if (qr) { status = ov.aviso ? '' : 'Procurando o QR Code…'; }
     else if (ov.marc >= 2) {
-      status = '4 marcadores detectados — pode fotografar';
+      status = '4 marcadores encontrados — pode fotografar';
       cls = 'ok';
+      if (ov.ocupacao != null && ov.ocupacao < 0.3) status = '4 marcadores encontrados — aproxime até preencher a moldura';
     } else {
       status = 'Procurando os 4 quadrados pretos…';
       if (ov.ocupacao != null && ov.ocupacao < 0.2) status += ' Aproxime o cartão.';
@@ -291,12 +309,18 @@ export default function leitura(params) {
       atualizarOverlay();
       return false;
     }
-    return aceitarAvaliacao(d.avaliacao);
+    // O QR carrega versão do layout e tamanho da grade: cartão incompatível para aqui,
+    // antes de fotografar, com o motivo certo.
+    if (d.conflitos && d.conflitos.length) {
+      avisoTemporario(`Este cartão não serve para "${d.avaliacao?.titulo || ''}": ${d.conflitos.join('; ')}. Imprima um cartão novo na aba Cartões.`, 9000);
+      return false;
+    }
+    return aceitarAvaliacao(d.avaliacao, d.cartao);
   }
 
   const validarAssociacao = (av) => validarAssoc(store, av, st.alunoId, st.turmaId);
 
-  function aceitarAvaliacao(av) {
+  function aceitarAvaliacao(av, cartao = null) {
     const v = validarAssociacao(av);
     if (!v.ok) {
       avisoTemporario(v.motivo, 5000);
@@ -304,6 +328,7 @@ export default function leitura(params) {
     }
     st.avaliacaoId = av.id;
     st.qrLido = true;
+    st.cartaoQR = cartao || null;
     ov.passo = 'cartao';
     ov.marc = 0;
     ov.aviso = null;
@@ -341,11 +366,8 @@ export default function leitura(params) {
     if (!ov.aberto) return;   // a câmera foi fechada durante a leitura: não mexe na tela
 
     if (!r.ok) {
-      let msg = MSG_BLOQUEIO[r.motivo] || r.mensagem || 'Não foi possível ler este cartão.';
-      if (r.motivo === 'qr_diferente' && r.etapas?.qr?.texto) {
-        msg = `Este cartão é de outra avaliação (QR "${r.etapas.qr.texto}"). Esperado: "${codigoDe(av)}" (${av.titulo}). Nada foi lido.`;
-      }
-      ov.erro = msg;
+      // O motivo vem pronto do pipeline (cortado, outra versão, outra avaliação, grade…).
+      ov.erro = [r.mensagem || 'Não foi possível ler este cartão.', DICA_BLOQUEIO[r.motivo]].filter(Boolean).join(' ');
       atualizarOverlay();
       return;
     }
@@ -353,6 +375,7 @@ export default function leitura(params) {
     st.processo = r;
     st.imagemProc = { data: imagem.data, width: imagem.width, height: imagem.height };
     st.modo = 'foto';
+    st.cartaoQR = r.etapas.qr.cartao || st.cartaoQR;
     st.semQR = !r.etapas.qr.ok;
     st.confirmaCartao = false;
     montarLeituras(r.leituras);
@@ -363,6 +386,39 @@ export default function leitura(params) {
 
   async function aguardarLivre() {
     for (let i = 0; i < 100 && ov.ocupado; i++) await dorme(30);
+  }
+
+  /** Espera o vídeo entregar um quadro na resolução alta depois de subir a câmera. */
+  async function esperarQuadroMaior() {
+    const alvo = ov.camInfo?.maxima?.largura || 0;
+    if (!alvo) return;
+    for (let i = 0; i < 16; i++) {
+      if (video.videoWidth >= alvo * 0.9) return;
+      await dorme(50);
+    }
+  }
+
+  /**
+   * Foto final na MAIOR resolução: ImageCapture (quando o navegador tem) ou
+   * subindo a câmera só durante a captura e voltando para a pré-visualização.
+   */
+  async function capturarFotoFinal() {
+    if (!stream) return quadroDoVideo(2400);
+    try {
+      const blob = await fotoEmAlta(stream);
+      if (blob) return await imagemDoArquivo(blob, 3200);
+    } catch (e) {
+      console.warn('[SICEP+] ImageCapture:', e);
+    }
+    const track = stream.getVideoTracks()[0];
+    if (!track || !ov.camInfo?.maxima?.largura) return quadroDoVideo(2400);
+    const restaurar = await prepararCaptura(track, ov.camInfo);
+    try {
+      await esperarQuadroMaior();
+      return quadroDoVideo(3200);
+    } finally {
+      await restaurar();
+    }
   }
 
   async function tirarFoto() {
@@ -378,10 +434,16 @@ export default function leitura(params) {
       } finally { ov.ocupado = false; }
       return;
     }
-    const q = quadroDoVideo(2400);
+    ov.ocupado = true;
+    let q = null;
+    try {
+      q = await capturarFotoFinal();
+    } finally {
+      ov.ocupado = false;
+    }
     if (!q) return;
     // congela a imagem na tela enquanto processa
-    try { $cf('[data-cf-img]').src = quadroCanvas.toDataURL('image/jpeg', 0.7); $cf('[data-cf-img]').hidden = false; } catch (_) { /* só visual */ }
+    try { $cf('[data-cf-img]').src = q.canvas.toDataURL('image/jpeg', 0.7); $cf('[data-cf-img]').hidden = false; } catch (_) { /* só visual */ }
     await processarImagem(q);
   }
 
@@ -389,31 +451,37 @@ export default function leitura(params) {
 
   /* ---- análise ao vivo ---- */
 
+  /**
+   * Análise ao vivo — barata de propósito: quadro pequeno, sem tentar decodificar
+   * o QR em várias escalas a cada ciclo. A leitura “de verdade” acontece na captura.
+   */
   async function analisarQuadro() {
+    if (document.hidden || !video.videoWidth) return;
     if (ov.passo === 'qr') {
       if (ov.escolha || ov.erro) return;
-      const q = quadroDoVideo(960);
+      const q = quadroDoVideo(720);
       if (!q) return;
-      const t = await lerQR(ov.cv, q, q.canvas);
+      const t = await lerQR(ov.cv, q, q.canvas, { rapido: true });
       if (t && ov.aberto) tratarQR(t);
       return;
     }
-    const q = quadroDoVideo(640);
+    const q = quadroDoVideo(560);
     if (!q) return;
-    const r = detectarMarcadores(ov.cv, q, { maxLado: 640 });
+    const r = detectarMarcadores(ov.cv, q, { maxLado: 560 });
     ov.marc = r.ok ? Math.min(3, ov.marc + 1) : 0;
     ov.ocupacao = r.ok ? r.ocupacao : null;
-    atualizarOverlay();
+    atualizarOverlay();   // só redesenha quando algo muda (ver assinatura em atualizarOverlay)
   }
 
   async function ciclo() {
     ov.timer = null;
     if (!ov.aberto) return;
+    if (document.hidden) { ov.timer = setTimeout(ciclo, 1000); return; }   // aba em segundo plano: não gasta CPU
     if (ov.cv && !ov.processando && !ov.erro && !ov.ocupado && video.videoWidth) {
       ov.ocupado = true;
       try { await analisarQuadro(); } catch (e) { console.warn('[SICEP+] leitura ao vivo:', e); } finally { ov.ocupado = false; }
     }
-    if (ov.aberto) ov.timer = setTimeout(ciclo, ov.passo === 'qr' ? 400 : 250);
+    if (ov.aberto) ov.timer = setTimeout(ciclo, ov.passo === 'qr' ? 550 : 280);
   }
 
   /* ---- abrir / fechar ---- */
@@ -749,7 +817,7 @@ export default function leitura(params) {
     if (!assoc.ok) { toast(assoc.motivo + ' Nada foi salvo.', 'err'); return; }
     const pode = podeSalvar();
     if (!pode.ok) { toast(pode.motivo || 'Aguarde.', 'err'); return; }
-    if (st.modo === 'foto' && st.processo?.etapas?.qr?.texto && !igual(st.processo.etapas.qr.texto, codigoDe(av))) {
+    if (st.modo === 'foto' && st.processo?.etapas?.qr?.texto && !igual(codigoDoQR(st.processo.etapas.qr.texto), codigoDe(av))) {
       toast('O QR do cartão não é desta avaliação. Nada foi salvo.', 'err');
       return;
     }
@@ -898,8 +966,9 @@ export default function leitura(params) {
       toast('Relendo o cartão com os ajustes atuais…');
       await dorme(30);
       const r = await processarCartao(cv, st.imagemProc, opcoesDeLeitura());
-      if (!r.ok) { toast(MSG_BLOQUEIO[r.motivo] || r.mensagem || 'Não foi possível reler.', 'err'); return; }
+      if (!r.ok) { toast(r.mensagem || 'Não foi possível reler.', 'err'); return; }
       st.processo = r;
+      st.cartaoQR = r.etapas.qr.cartao || null;
       st.semQR = !r.etapas.qr.ok;
       montarLeituras(r.leituras, st.leituras);
       toast('Cartão relido. Respostas editadas por você foram mantidas.', 'ok');
@@ -1247,6 +1316,7 @@ export default function leitura(params) {
           ? '<p class="xs muted" style="margin-bottom:10px">Lançamento manual (sem foto): toque em cada questão e marque a alternativa do cartão.</p>'
           : `${legendaHTML()}
              <p class="xs muted" style="margin:10px 0">Amarelo = precisa da sua decisão. Toque na questão para escolher a alternativa ou deixar em branco.</p>`}
+        ${!manual && st.cartaoQR ? `<p class="xs muted" style="margin:0 0 8px">Cartão lido: ${esc(descreverCartao(st.cartaoQR))}</p>` : ''}
         <div class="ans-grid" id="grade">${st.leituras.map(tileHTML).join('')}</div>
         <div id="editor-box"></div>
         <div class="row wrap" style="gap:8px;margin-top:10px">

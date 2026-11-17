@@ -69,7 +69,7 @@ function shell(hash, conteudo, titulo) {
 
   const sidenav = el(`<aside class="sidenav">
     <div class="brand">
-      <span class="mark">S+</span>
+      <span class="mark"><img src="assets/icons/icon.svg" alt="" /></span>
       <span>
         <span class="brand-name">SICEP+</span>
         <span class="brand-sub">Correção de provas</span>
@@ -94,7 +94,7 @@ function shell(hash, conteudo, titulo) {
   const main = el(`<div class="app-main">
     <header class="appbar">
       <div class="brand">
-        <span class="mark">S+</span>
+        <span class="mark"><img src="assets/icons/icon.svg" alt="" /></span>
         <span>
           <span class="brand-name">SICEP+</span>
           <span class="brand-sub">${esc(titulo || '')}</span>

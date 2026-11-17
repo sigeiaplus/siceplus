@@ -22,6 +22,12 @@ export class CameraErro extends Error {
 /** Resolução pedida (o navegador entrega o modo mais próximo; depois sobe até o máximo da câmera). */
 export const RESOLUCAO_ALVO = { largura: 4096, altura: 3072 };
 
+/**
+ * Resolução da PRÉ-VISUALIZAÇÃO. O vídeo roda nesse tamanho (fluido) e a foto
+ * final é tirada na resolução máxima da câmera (ver prepararCaptura / fotoEmAlta).
+ */
+export const LARGURA_PREVIAO = 1440;
+
 const semAcento = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
 /**
@@ -173,10 +179,15 @@ export async function abrirCameraPrincipal(md) {
     throw new CameraErro('lente-errada', 'O aparelho abriu uma lente que não é a principal (1x). Use "Enviar foto".');
   }
 
-  // 5) 1x e resolução máxima.
+  // 5) 1x e resolução máxima: assim a foto final tem a maior resolução disponível.
   const zoomAjustado = await garantirZoom1x(track);
   await subirResolucao(track);
   const final = track.getSettings ? track.getSettings() : {};
+  const maxima = { largura: final.width || null, altura: final.height || null };
+
+  // 6) Pré-visualização em resolução menor. Quadros de 12 MP sendo desenhados a
+  //    cada frame travam a tela do celular; a foto continua saindo no tamanho máximo.
+  const previa = await reduzirParaPrevia(track, maxima);
 
   return {
     stream,
@@ -185,9 +196,72 @@ export async function abrirCameraPrincipal(md) {
       label: track.label || escolha.label,
       confianca: escolha.confianca,
       motivo: escolha.motivo,
-      largura: final.width || null,
-      altura: final.height || null,
+      largura: previa.largura || maxima.largura,
+      altura: previa.altura || maxima.altura,
+      maxima,
+      previa,
       zoomAjustado,
     },
   };
+}
+
+/** Baixa a resolução do vídeo para a pré-visualização (mantém a foto no máximo). */
+async function reduzirParaPrevia(track, maxima) {
+  const atual = track.getSettings ? track.getSettings() : {};
+  if (!maxima.largura || maxima.largura <= LARGURA_PREVIAO * 1.1) {
+    return { largura: atual.width || maxima.largura, altura: atual.height || maxima.altura };
+  }
+  const proporcao = (maxima.altura || 3) / (maxima.largura || 4);
+  try {
+    await track.applyConstraints({
+      width: { ideal: LARGURA_PREVIAO },
+      height: { ideal: Math.round(LARGURA_PREVIAO * proporcao) },
+    });
+  } catch (_) { /* segue com a resolução que estiver */ }
+  const s = track.getSettings ? track.getSettings() : {};
+  return { largura: s.width || maxima.largura, altura: s.height || maxima.altura };
+}
+
+/**
+ * Sobe a câmera para a resolução máxima só durante a foto e devolve a função que
+ * volta para a pré-visualização. Se o navegador recusar, devolve uma função vazia
+ * e a captura usa o quadro atual do vídeo (nunca pior do que antes).
+ */
+export async function prepararCaptura(track, info) {
+  const nada = async () => {};
+  if (!track || !track.applyConstraints || !info?.maxima?.largura) return nada;
+  const previa = info.previa || {};
+  try {
+    await track.applyConstraints({
+      width: { ideal: info.maxima.largura },
+      height: { ideal: info.maxima.altura },
+    });
+  } catch (_) {
+    return nada;
+  }
+  return async () => {
+    try {
+      await track.applyConstraints({
+        width: { ideal: previa.largura || LARGURA_PREVIAO },
+        height: { ideal: previa.altura || Math.round(LARGURA_PREVIAO * 0.75) },
+      });
+    } catch (_) { /* mantém a resolução maior: só afeta a fluidez do próximo enquadramento */ }
+  };
+}
+
+/**
+ * Foto em resolução máxima pelo ImageCapture (Chrome/Android tira foto no sensor,
+ * sem passar pelo vídeo). Devolve um Blob ou null quando o navegador não suporta.
+ */
+export async function fotoEmAlta(stream) {
+  const track = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+  if (!track || typeof globalThis.ImageCapture === 'undefined') return null;
+  try {
+    const captura = new globalThis.ImageCapture(track);
+    if (typeof captura.takePhoto !== 'function') return null;
+    const blob = await captura.takePhoto();
+    return blob && blob.size ? blob : null;
+  } catch (_) {
+    return null;
+  }
 }

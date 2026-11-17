@@ -2,19 +2,27 @@
    SICEP+ · OMR — pipeline completo de leitura do cartão
    ------------------------------------------------------------
    Une as etapas do leitor.js (OpenCV) em uma chamada só:
-     foto → 4 marcadores → perspectiva → conferência da grade
-          → QR (na folha endireitada) → bolinhas → estados
+     foto → 4 marcadores → perspectiva → QR → conferência da grade
+          → bolinhas → estados
 
    REGRA DE SEGURANÇA: o que for duvidoso (marca fraca, marcação dupla,
-   leitura incerta, grade que não confere, cartão de outra avaliação)
-   NÃO vira resposta. Fica com `detectada = null` e `confere = true`.
-   Use respostasConfirmadas() para saber o que pode seguir sem conferência.
+   leitura incerta, grade que não confere, cartão de outra versão ou de
+   outra avaliação) NÃO vira resposta. Fica com `detectada = null` e
+   `confere = true`. Use respostasConfirmadas() para saber o que pode
+   seguir sem conferência.
+
+   O bloqueio é sempre explicado: cada motivo tem uma mensagem própria
+   (cartão cortado, outra versão, outra avaliação, grade não confere…),
+   para o professor saber o que refazer.
    ============================================================ */
 
 import {
-  PARAMS_PADRAO, mesclarParams, layoutDeAvaliacao,
-  detectarMarcadores, alinharCartao, verificarGrade, lerBolhas, lerQRNaFolha, lerQR,
+  PARAMS_PADRAO, mesclarParams, layoutDeAvaliacao, LETRAS_CARTAO,
+  detectarMarcadores, alinharCartao, verificarGrade, diagnosticarGrade,
+  lerBolhas, lerQRNaFolha, lerQR,
 } from './leitor.js';
+import { interpretarPayload, resumoQR } from './qr-caderno.js';
+import { GEOMETRIA_VERSAO, layoutCartao } from './geometria.js';
 
 const CHAVE_PARAMS = 'sicep.omr.params';
 
@@ -43,14 +51,29 @@ export function restaurarParametros() {
   return mesclarParams({});
 }
 
-/* ---------------- Pipeline ---------------- */
+/* ---------------- Mensagens de bloqueio ---------------- */
 
+/**
+ * Cada motivo tem texto próprio: o professor precisa saber se o problema é
+ * o cartão (versão/avaliação), a foto (corte/tremida) ou o preenchimento.
+ */
 const MOTIVOS = {
-  mais_de_50: 'O cartão comporta no máximo 50 questões.',
-  marcadores: 'Não achei os 4 quadrados pretos dos cantos. Mostre o cartão inteiro, com boa luz.',
-  alinhamento: 'Os quadrados dos cantos não bateram com o cartão. Fotografe de frente, sem dobras.',
-  qr_diferente: 'Este cartão é de outra avaliação (o QR não confere).',
+  mais_de_50: () => 'O cartão comporta no máximo 50 questões.',
+  marcadores: (c) => (c.achados >= 2
+    ? `Encontrei apenas ${c.achados} dos 4 quadrados pretos dos cantos. O cartão pode estar cortado na foto — afaste um pouco a câmera e enquadre a folha inteira.`
+    : 'Não achei os 4 quadrados pretos dos cantos. Mostre o cartão inteiro, com boa luz e sem sombra.'),
+  cartao_cortado: () => 'Os quadrados dos cantos estão na beirada da foto: o cartão foi cortado. Afaste a câmera e enquadre a folha inteira, com uma margem em volta.',
+  alinhamento: () => 'Os quadrados dos cantos não bateram com o cartão. Fotografe de frente, sem dobras e com os 4 quadrados inteiros dentro da foto — se algum canto estiver cortado, o cartão não é lido.',
+  versao_diferente: (c) => `Este cartão foi impresso com o layout v${c.geometria} do cartão-resposta e o SICEP+ atual usa o v${GEOMETRIA_VERSAO}. Gere e imprima um cartão novo desta avaliação (aba Cartões).`,
+  cartao_outra_versao: (c) => `As bolinhas deste cartão não batem com a avaliação: o cartão impresso usa ${c.grade.cols} coluna(s) × ${c.grade.rows} linha(s) e esta avaliação usa ${c.atual?.colunas} × ${c.atual?.linhas}. Ele foi impresso antes de a avaliação ser alterada (ou em outra versão do cartão). Gere e imprima um cartão novo na aba Cartões.`,
+  questoes_diferentes: (c) => `O QR deste cartão diz ${c.questoes} questões, mas a avaliação tem ${c.avaliacao}. O cartão é de outra versão da avaliação — imprima um cartão novo.`,
+  alternativas_diferentes: (c) => `O QR deste cartão diz ${c.alternativas} alternativas, mas a avaliação tem ${c.avaliacaoAlts}. Imprima um cartão novo desta avaliação.`,
+  qr_diferente: (c) => `Este cartão é de outra avaliação (QR "${c.lido}"). Esperado: "${c.esperado}". Nada foi lido.`,
+  grade: () => 'As bolinhas deste cartão não batem com o layout desta avaliação. Prováveis causas: cartão de outra versão/impressão antiga, foto torta ou cartão amassado. Se o cartão foi impresso antes de alguma alteração na avaliação, imprima um cartão novo (aba Cartões).',
+  erro: (c) => 'Erro ao processar a imagem' + (c.detalhe ? ': ' + c.detalhe : '.') + ' Tente outra foto.',
 };
+
+/* ---------------- Pipeline ---------------- */
 
 /**
  * @param {object} cv        OpenCV carregado (carregarOpenCV().cv)
@@ -61,17 +84,18 @@ const MOTIVOS = {
  * @param {string} [o.codigoEsperado]   código do caderno da avaliação escolhida (compara com o QR)
  * @param {object} [o.params]           ajustes de leitura (ver PARAMS_PADRAO); padrão = salvos no aparelho
  * @param {HTMLCanvasElement} [o.canvasQR] ajuda o BarcodeDetector nativo, se existir
- * @returns {Promise<object>} { ok, bloqueado, motivo, aviso[], etapas, leituras, resumo, alinhada, params, ms }
+ * @returns {Promise<object>} { ok, bloqueado, motivo, mensagem, aviso[], etapas, layout, leituras, resumo, alinhada, params, ms }
  */
 export async function processarCartao(cv, imagem, o = {}) {
   const t0 = Date.now();
   const P = mesclarParams(o.params || carregarParametros());
   const etapas = {
-    marcadores: { ok: false }, perspectiva: { ok: false }, grade: { ok: false }, qr: { ok: false, texto: null, origem: null },
+    marcadores: { ok: false }, perspectiva: { ok: false }, grade: { ok: false },
+    qr: { ok: false, texto: null, origem: null, cartao: null }, diagnostico: null,
   };
   const aviso = [];
-  const falha = (chave) => ({
-    ok: false, bloqueado: true, motivo: chave, mensagem: MOTIVOS[chave], aviso, etapas,
+  const falha = (chave, ctx = {}) => ({
+    ok: false, bloqueado: true, motivo: chave, mensagem: MOTIVOS[chave](ctx), aviso, etapas,
     leituras: [], resumo: resumir([], true), alinhada: null, params: P, ms: Date.now() - t0,
   });
 
@@ -81,72 +105,113 @@ export async function processarCartao(cv, imagem, o = {}) {
   } catch (e) {
     return falha('mais_de_50');
   }
+  const nQuestoes = layout.numeros.length;
+  const nAlts = (o.numAlternativas || 5);
 
   const m = detectarMarcadores(cv, imagem, { maxLado: P.maxLado });
-  etapas.marcadores = { ok: m.ok, achados: m.achados ?? 0, ocupacao: m.ocupacao ?? null };
-  if (!m.ok) return falha('marcadores');
+  etapas.marcadores = {
+    ok: m.ok, achados: m.achados ?? 0, ocupacao: m.ocupacao ?? null, margem: m.margem ?? null, cortado: !!m.cortado,
+  };
+  if (!m.ok) return falha('marcadores', { achados: m.achados ?? 0 });
+  if (m.cortado) return falha('cartao_cortado');
 
   const al = alinharCartao(cv, imagem, m.cantos);
   etapas.perspectiva = { ok: !!al.ok };
-  if (!al.ok) return falha('alinhamento');
+  if (!al.ok) {
+    // Quadrados achados na beirada da foto + retângulo que não fecha = folha cortada.
+    if (m.cortado || (m.margem != null && m.margem < 0.03)) return falha('cartao_cortado');
+    return falha('alinhamento');
+  }
 
   try {
-    // 1) a grade do cartão bate com o layout esperado?
-    const g = verificarGrade(cv, al.cinza, layout, P.minGrade);
-    etapas.grade = g;
-
-    // 2) QR: primeiro na folha endireitada; só depois na foto inteira.
+    // 1) QR: primeiro na folha endireitada; só depois na foto inteira.
     let texto = lerQRNaFolha(cv, al.rgba);
     let origem = texto ? 'folha' : null;
     if (!texto) {
       texto = await lerQR(cv, imagem, o.canvasQR || null);
       origem = texto ? 'foto' : null;
     }
-    etapas.qr = { ok: !!texto, texto, origem };
+    const cartao = texto ? interpretarPayload(texto) : null;
+    etapas.qr = { ok: !!texto, texto, origem, cartao };
 
-    // 3) bolinhas
+    if (!texto) aviso.push('qr_nao_lido');
+
+    // 2) O QR diz de que cartão é: conferir versão do layout e tamanho da grade.
+    if (cartao && !cartao.legado) {
+      if (cartao.geometria && cartao.geometria !== GEOMETRIA_VERSAO) {
+        return falha('versao_diferente', { geometria: cartao.geometria });
+      }
+      if (cartao.questoes && cartao.questoes !== nQuestoes) {
+        return falha('questoes_diferentes', { questoes: cartao.questoes, avaliacao: nQuestoes });
+      }
+      if (cartao.alternativas && cartao.alternativas !== nAlts) {
+        return falha('alternativas_diferentes', { alternativas: cartao.alternativas, avaliacaoAlts: nAlts });
+      }
+    }
+
+    // 3) O cartão é da avaliação escolhida?
+    const esperado = String(o.codigoEsperado || '').trim();
+    if (esperado && cartao && !igualCodigo(cartao.codigo, esperado)) {
+      return falha('qr_diferente', { lido: resumoQR(texto), esperado });
+    }
+
+    // 4) A grade impressa corresponde ao layout calculado?
+    const g = verificarGrade(cv, al.cinza, layout, P.minGrade);
+    etapas.grade = g;
+    if (!g.ok) {
+      aviso.push('grade_nao_confere');
+      // Antes de culpar a foto: o cartão pode ser de outra versão do layout.
+      const d = diagnosticarGrade(cv, al.cinza, {
+        questoes: o.questoes || [], numAlternativas: nAlts, minimo: P.minGrade,
+      });
+      etapas.diagnostico = d;
+      // Só afirma "outra versão" quando outra grade explica MUITO bem o que está impresso.
+      const outraGrade = d.grade && (d.grade.cols !== layout.colunas || d.grade.rows !== layout.linhas);
+      if (outraGrade && d.razao >= Math.max(0.85, P.minGrade)) {
+        return falha('cartao_outra_versao', { grade: d.grade, atual: layout });
+      }
+      return falha('grade', { razao: g.razao, impresso: layout });
+    }
+
+    // 5) bolinhas
     let leituras = lerBolhas(cv, al.cinza, layout, P).leituras;
 
-    // 4) motivos para NÃO confiar em nada automaticamente
-    let bloqueado = false, motivo = null;
-    const esperado = String(o.codigoEsperado || '').trim().toLowerCase();
-    if (esperado && texto && String(texto).trim().toLowerCase() !== esperado) {
-      bloqueado = true; motivo = 'qr_diferente';
-    } else if (!g.ok) {
-      bloqueado = true; motivo = 'grade';
-    }
-    if (!texto) aviso.push('qr_nao_lido');
-    if (!g.ok) aviso.push('grade_nao_confere');
-
-    if (bloqueado) {
-      // Nada vira resposta: a leitura vira só sugestão para quem conferir.
-      leituras = leituras.map((l) => (l.estado === 'anulada' ? l : {
-        ...l, sugestao: l.sugestao || l.detectada, detectada: null, confere: true, bloqueada: true,
-      }));
+    // Grade "quase" certa (algumas bolinhas fora do lugar): cartão pode ter sido impresso
+    // com outra versão da avaliação. Questão em branco deixa de ser resposta automática
+    // e passa para a conferência — em branco por não existir no cartão é diferente de
+    // em branco por não ter sido marcada.
+    if (g.razao < 0.95) {
+      aviso.push('grade_parcial');
+      leituras = leituras.map((l) => (l.estado === 'branco' ? { ...l, confere: true } : l));
     }
 
     // cópia simples da folha endireitada (para desenharRevisao) — os Mats são liberados abaixo
     const alinhada = { cols: al.rgba.cols, rows: al.rgba.rows, data: new Uint8ClampedArray(al.rgba.data) };
 
     return {
-      ok: !bloqueado,
-      bloqueado,
-      motivo,
-      mensagem: motivo ? (MOTIVOS[motivo] || 'A leitura não confere com o cartão esperado. Confira tudo manualmente.') : null,
+      ok: true,
+      bloqueado: false,
+      motivo: null,
+      mensagem: null,
       aviso,
       etapas,
       layout,
       leituras,
-      resumo: resumir(leituras, bloqueado),
+      resumo: resumir(leituras, false),
       alinhada,
       params: P,
       ms: Date.now() - t0,
     };
+  } catch (e) {
+    console.error('[SICEP+] processarCartao', e);
+    return falha('erro', { detalhe: e?.message || String(e) });
   } finally {
     al.cinza.delete();
     al.rgba.delete();
   }
 }
+
+const igualCodigo = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 
 /* ---------------- Uso do resultado ---------------- */
 
@@ -163,6 +228,23 @@ export function respostasConfirmadas(resultado) {
 /** Números das questões que precisam de conferência manual. */
 export function questoesParaConferir(resultado) {
   return (resultado?.leituras || []).filter((l) => l.confere).map((l) => l.numero);
+}
+
+/** Rótulo curto de como o cartão foi impresso, para exibir na conferência. */
+export function descreverCartao(cartao) {
+  if (!cartao) return '';
+  if (cartao.legado) return 'QR antigo (só o código do caderno)';
+  return [
+    `caderno ${cartao.caderno || '—'}`,
+    cartao.geometria ? `layout v${cartao.geometria}` : null,
+    cartao.questoes ? `${cartao.questoes} questões` : null,
+    cartao.alternativas ? `${cartao.alternativas} alternativas` : null,
+  ].filter(Boolean).join(' · ');
+}
+
+/** Layout do cartão para a grade forçada (usado em diagnóstico/testes). */
+export function layoutParaGrade(questoes, grade, numAlternativas = 5) {
+  return layoutCartao(questoes, numAlternativas, LETRAS_CARTAO.slice(0, numAlternativas), grade);
 }
 
 function resumir(leituras, bloqueado) {

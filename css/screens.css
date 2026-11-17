@@ -311,6 +311,15 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 .cf-alvo .bl { bottom: 0; left: 0; border-right: 0; border-top: 0; border-radius: 0 0 0 8px; }
 .cf-alvo .br { bottom: 0; right: 0; border-left: 0; border-top: 0; border-radius: 0 0 8px 0; }
 
+/* No cartão, os cantos da moldura ficam sobre os 4 quadrados pretos impressos:
+   eles estão 4 mm dentro da folha (2,15% da largura e 1,47% da altura). */
+.cf-alvo.cartao { outline: 1px dashed rgba(255,255,255,.28); outline-offset: 6px; border-radius: 2px; }
+.cf-alvo.cartao .c { width: 24px; height: 24px; border-width: 3px; }
+.cf-alvo.cartao .tl { top: 1.47%; left: 2.15%; }
+.cf-alvo.cartao .tr { top: 1.47%; right: 2.15%; }
+.cf-alvo.cartao .bl { bottom: 1.47%; left: 2.15%; }
+.cf-alvo.cartao .br { bottom: 1.47%; right: 2.15%; }
+
 .cf-status, .cf-aviso, .cf-escolha, .cf-manual {
   margin: 8px 14px 0; padding: 10px 14px; border-radius: var(--r); font-size: 13.5px; text-align: center;
 }
