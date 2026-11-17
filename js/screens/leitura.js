@@ -121,6 +121,8 @@ export default function leitura(params) {
   `);
   const $cf = (s) => cf.querySelector(s);
   const video = $cf('video');
+  video.addEventListener('loadedmetadata', ajustarAlvo);
+  video.addEventListener('resize', ajustarAlvo);
 
   const fileInput = el('<input type="file" accept="image/*" capture="environment" hidden data-file />');
   const body = el('<div class="stack"></div>');
@@ -230,10 +232,60 @@ export default function leitura(params) {
     }
   });
 
+  /* ---- moldura da câmera: sempre dentro da parte da tela em que a imagem aparece ---- */
+
+  /**
+   * A prévia usa object-fit: contain. Quando a câmera entrega um quadro mais largo que a tela
+   * (comum no celular em pé: 4:3 deitado), sobra faixa preta em cima e embaixo. A moldura fixa
+   * (86vw × 58dvh) ficava maior que a imagem: não havia como encaixar os 4 cantos do cartão.
+   * Aqui a moldura é medida a partir da área em que a câmera realmente aparece.
+   */
+  function ajustarAlvo() {
+    const alvo = $cf('[data-cf-alvo]');
+    const r = video.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+
+    // área visível do vídeo (desconta as faixas pretas)
+    let x0 = r.left, x1 = r.right, y0 = r.top, y1 = r.bottom;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (vw && vh) {
+      const k = Math.min(r.width / vw, r.height / vh);
+      const dw = vw * k, dh = vh * k;
+      x0 += (r.width - dw) / 2; x1 = x0 + dw;
+      y0 += (r.height - dh) / 2; y1 = y0 + dh;
+    }
+
+    // A barra de baixo ocupa a base em pé e a lateral direita deitado.
+    const barra = $cf('.cf-baixo').getBoundingClientRect();
+    if (getComputedStyle($cf('.cf-baixo')).position === 'absolute') x1 = Math.min(x1, barra.left - 8);
+
+    // Espaço livre entre os avisos/instrução e os controles de baixo: a moldura não fica
+    // embaixo do texto nem do zoom.
+    const topoPilha = ['.cf-instr', '[data-cf-status]', '[data-cf-zoom]', '[data-cf-aviso]', '[data-cf-caderno]', '[data-cf-escolha]']
+      .map((s) => $cf(s))
+      .filter((e) => e && !e.hidden)
+      .reduce((m, e) => Math.max(m, e.getBoundingClientRect().bottom), 0);
+    const topo = Math.max(y0, topoPilha + 8);
+    const base = Math.min(y1, barra.top - 8);
+    const livre = base - topo;
+    const usaFolga = livre >= 140;
+    const centroY = usaFolga ? (topo + base) / 2 : (y0 + y1) / 2;
+    const alturaUtil = usaFolga ? livre : y1 - y0;
+
+    const prop = ov.passo === 'qr' ? 1 : 186 / 273;
+    const w = Math.min((x1 - x0) * 0.92, alturaUtil * 0.92 * prop);
+    if (!(w > 0)) return;
+    alvo.style.width = Math.round(w) + 'px';
+    alvo.style.height = Math.round(w / prop) + 'px';
+    alvo.style.left = Math.round((x0 + x1) / 2) + 'px';
+    alvo.style.top = Math.round(centroY) + 'px';
+  }
+
   /* ---- estado visual do overlay ---- */
 
   // A pré-visualização chama isto a cada quadro: só mexe no DOM quando algo mudou de verdade.
   let overlayAssinatura = '';
+  let alvoObs = null;
 
   function atualizarOverlay() {
     const qr = ov.passo === 'qr';
@@ -256,6 +308,7 @@ export default function leitura(params) {
         ? 'Aponte para o QR Code do cartão, de frente e com boa luz.'
         : 'Mantenha a folha reta e os 4 quadrados pretos dos cantos dentro da moldura.');
     $cf('[data-cf-alvo]').className = 'cf-alvo ' + (qr ? 'qr' : 'cartao') + (!qr && ov.marc >= 2 ? ' ok' : '');
+    ajustarAlvo();
     // Passo do QR: o caderno só é identificado pela leitura do QR Code (sem digitar código).
     const bm = $cf('[data-cf-manual]');
     bm.textContent = 'Lançar manualmente';
@@ -629,6 +682,10 @@ export default function leitura(params) {
     document.body.classList.add('cam-open');
     entrarTelaCheia();   // ainda no gesto do toque; não há await antes
     atualizarOverlay();
+    if (!alvoObs && typeof ResizeObserver !== 'undefined') {
+      alvoObs = new ResizeObserver(() => ajustarAlvo());
+      alvoObs.observe(cf);   // gira a tela / muda a altura visível: remede a moldura
+    }
 
     if (!ov.cv) carregarLeitor();
     await ligarCamera();
@@ -1611,6 +1668,7 @@ export default function leitura(params) {
     destroy: () => {
       ov.aberto = false;
       clearTimeout(ov.timer);
+      if (alvoObs) { alvoObs.disconnect(); alvoObs = null; }
       document.body.classList.remove('cam-open');
       sairTelaCheia();
       pararCamera();

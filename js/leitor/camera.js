@@ -214,7 +214,7 @@ export async function abrirCameraPrincipal(md) {
   await subirResolucao(track);
   const final = track.getSettings ? track.getSettings() : {};
   const maxima = { largura: final.width || null, altura: final.height || null };
-  const previa = await reduzirParaPrevia(track, maxima);
+  const previa = await reduzirParaPrevia(track);
 
   // 6) Zoom por ÚLTIMO: trocar a resolução muda o recorte do sensor, então zerar o zoom
   //    antes dela deixava a imagem parecendo 2x ao abrir.
@@ -242,21 +242,35 @@ export async function abrirCameraPrincipal(md) {
   };
 }
 
+/**
+ * Tamanho da PRÉ-VISUALIZAÇÃO: maior lado com LARGURA_PREVIAO, na mesma proporção da câmera,
+ * mas girado quando a proporção não bate com a tela. Sem isso o celular em pé recebe um quadro
+ * 4:3 deitado e a imagem fica numa faixa no meio da tela (com faixa preta em cima e embaixo).
+ * O aparelho que não tiver o modo girado devolve o que tiver — a moldura se ajusta depois.
+ */
+export function tamanhoPrevia(maxima) {
+  const larg = (maxima && maxima.largura) || 0;
+  const alt = (maxima && maxima.altura) || 0;
+  if (!larg || !alt) return { largura: LARGURA_PREVIAO, altura: Math.round(LARGURA_PREVIAO * 0.75) };
+  const k = LARGURA_PREVIAO / Math.max(larg, alt);
+  const w = Math.max(1, Math.round(larg * k));
+  const h = Math.max(1, Math.round(alt * k));
+  const telaEmPe = (window.innerHeight || 0) >= (window.innerWidth || 0);
+  return (h > w) === telaEmPe ? { largura: w, altura: h } : { largura: h, altura: w };
+}
+
 /** Baixa a resolução do vídeo para a pré-visualização (mantém a foto no máximo). */
-async function reduzirParaPrevia(track, maxima) {
+async function reduzirParaPrevia(track) {
   const atual = track.getSettings ? track.getSettings() : {};
-  if (!maxima.largura || maxima.largura <= LARGURA_PREVIAO * 1.1) {
-    return { largura: atual.width || maxima.largura, altura: atual.height || maxima.altura };
-  }
-  const proporcao = (maxima.altura || 3) / (maxima.largura || 4);
+  const alvo = tamanhoPrevia(atual);
   try {
     await track.applyConstraints({
-      width: { ideal: LARGURA_PREVIAO },
-      height: { ideal: Math.round(LARGURA_PREVIAO * proporcao) },
+      width: { ideal: alvo.largura },
+      height: { ideal: alvo.altura },
     });
   } catch (_) { /* segue com a resolução que estiver */ }
   const s = track.getSettings ? track.getSettings() : {};
-  return { largura: s.width || maxima.largura, altura: s.height || maxima.altura };
+  return { largura: s.width || atual.width || null, altura: s.height || atual.height || null };
 }
 
 /**
