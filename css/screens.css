@@ -269,12 +269,17 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
   -webkit-user-select: none; user-select: none;
 }
 .cam-full[hidden] { display: none; }
+/* A prévia mostra o quadro INTEIRO da câmera (o mesmo que a foto captura).
+   Com object-fit: cover o celular em pé recortava as laterais e o cartão parecia
+   ampliado (~2x), sem dar para enquadrar os 4 cantos. */
 .cam-full video, .cam-full > img {
-  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+  background: #000;
 }
 .cam-full > img[hidden], .cam-full video[hidden] { display: none; }
 .cam-full .cf-top, .cam-full .cf-instr, .cam-full .cf-baixo, .cam-full .cf-status,
-.cam-full .cf-aviso, .cam-full .cf-escolha, .cam-full .cf-manual, .cam-full .cf-refazer { position: relative; z-index: 3; }
+.cam-full .cf-aviso, .cam-full .cf-escolha, .cam-full .cf-manual, .cam-full .cf-refazer,
+.cam-full .cf-caderno, .cam-full .cf-zoom { position: relative; z-index: 3; }
 
 .cf-top {
   display: flex; align-items: center; gap: 10px;
@@ -303,7 +308,7 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 
 .cf-alvo { position: absolute; z-index: 2; pointer-events: none; left: 50%; top: 52%; transform: translate(-50%, -50%); }
 .cf-alvo.qr { width: min(62vw, 300px); aspect-ratio: 1; }
-.cf-alvo.cartao { width: min(86vw, 62dvh * .68); aspect-ratio: 186 / 273; max-height: 70dvh; }
+.cf-alvo.cartao { width: min(86vw, 54dvh * .681); aspect-ratio: 186 / 273; max-height: 58dvh; }
 .cf-alvo .c { position: absolute; width: 28px; height: 28px; border: 4px solid var(--y-500); transition: border-color .15s; }
 .cf-alvo.ok .c { border-color: #2BD46B; }
 .cf-alvo .tl { top: 0; left: 0; border-right: 0; border-bottom: 0; border-radius: 8px 0 0 0; }
@@ -335,6 +340,37 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 .cf-escolha p { margin: 0; font-weight: 650; }
 .cf-manual { background: rgba(255,255,255,.97); display: flex; gap: 8px; }
 .cf-manual .input { flex: 1; }
+
+/* Confirmação do caderno lido (nome + código) antes de fotografar */
+.cf-caderno {
+  margin: 10px 14px 0; padding: 14px 15px; border-radius: var(--r);
+  background: rgba(255,255,255,.98); color: var(--ink);
+  display: flex; flex-direction: column; gap: 3px;
+  box-shadow: 0 8px 26px rgba(0,0,0,.4);
+}
+.cf-caderno .cfc-rotulo {
+  display: flex; align-items: center; gap: 6px; margin: 0;
+  font-size: 10.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--y-700);
+}
+.cf-caderno .cfc-nome { font-size: 16px; line-height: 1.25; }
+.cf-caderno .cfc-sub { font-size: 12.5px; color: var(--ink-3); }
+.cf-caderno .cfc-pergunta { margin-top: 7px; font-size: 13px; font-weight: 650; }
+.cf-caderno .cfc-acoes { display: flex; gap: 8px; margin-top: 9px; }
+.cf-caderno .cfc-acoes .cf-sec { flex: 1 1 0; font-size: 13px; }
+.cf-sec.escuro { background: var(--bg); border: 1px solid var(--line-strong); color: var(--ink-2); }
+.cf-sec.forte { background: var(--y-500); border: 1px solid var(--y-500); color: var(--y-ink); font-weight: 750; }
+
+/* Zoom da câmera (1x, 2x, 3x) */
+.cf-zoom {
+  align-self: center; display: flex; gap: 4px; margin: 10px 14px 0;
+  padding: 4px; border-radius: 999px; background: rgba(20,24,29,.72);
+}
+.cf-zoom-btn {
+  min-width: 48px; min-height: 36px; padding: 0 12px;
+  border: 0; border-radius: 999px; background: transparent; color: #fff;
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.cf-zoom-btn.on { background: var(--y-500); color: var(--y-ink); }
 
 .cf-baixo {
   margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -372,9 +408,11 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
   }
   .cam-full .cf-instr strong { font-size: 15px; }
   .cam-full .cf-sub { font-size: 12px; }
-  .cam-full .cf-status, .cam-full .cf-aviso, .cam-full .cf-escolha, .cam-full .cf-manual {
+  .cam-full .cf-status, .cam-full .cf-aviso, .cam-full .cf-escolha, .cam-full .cf-manual, .cam-full .cf-caderno {
     margin: 6px calc(124px + env(safe-area-inset-right, 0px)) 0 calc(14px + env(safe-area-inset-left, 0px)); padding: 7px 12px; font-size: 13px;
   }
+  .cam-full .cf-zoom { margin: 6px calc(124px + env(safe-area-inset-right, 0px)) 0 14px; }
+  .cf-zoom-btn { min-height: 32px; min-width: 44px; font-size: 12.5px; }
   .cam-full .cf-refazer { margin: 6px calc(124px + env(safe-area-inset-right, 0px)) 0 14px; }
   .cam-full .cf-baixo {
     position: absolute; top: 0; right: 0; bottom: 0; margin: 0;

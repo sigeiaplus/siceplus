@@ -104,19 +104,49 @@ export function escolherPrincipal(dispositivos) {
 
 const pixels = (s) => (s && s.width && s.height ? s.width * s.height : 0);
 
-/** Se o zoom da câmera começar fora de 1x (e o navegador permitir), volta para 1x. */
-async function garantirZoom1x(track) {
-  const cap = track.getCapabilities ? track.getCapabilities() : null;
+/** Zoom máximo oferecido na interface. */
+export const ZOOM_MAX = 3;
+
+/** Faixa de zoom que a câmera aberta aceita (null = o navegador não deixa controlar). */
+export function limitesZoom(track) {
+  const cap = track && track.getCapabilities ? track.getCapabilities() : null;
+  const c = cap && cap.zoom;
+  if (!c || typeof c.min !== 'number' || typeof c.max !== 'number' || !(c.max > c.min)) return null;
   const set = track.getSettings ? track.getSettings() : {};
-  if (!cap || !cap.zoom || typeof set.zoom !== 'number') return false;
-  if (Math.abs(set.zoom - 1) < 0.01) return false;
-  if (cap.zoom.min > 1 || cap.zoom.max < 1) return false;
+  return {
+    min: c.min,
+    max: c.max,
+    passo: c.step || 0.1,
+    atual: typeof set.zoom === 'number' ? set.zoom : c.min,
+  };
+}
+
+/**
+ * Aplica um zoom (1x = mais aberto que o aparelho permite, no mínimo; até ZOOM_MAX).
+ * Devolve o valor efetivo ou null quando a câmera não aceita zoom.
+ */
+export async function aplicarZoom(track, fator) {
+  const lim = limitesZoom(track);
+  if (!lim || !track.applyConstraints) return null;
+  const alvo = Math.min(lim.max, Math.max(lim.min, Number(fator) || 1));
   try {
-    await track.applyConstraints({ advanced: [{ zoom: 1 }] });
-    return true;
+    await track.applyConstraints({ advanced: [{ zoom: alvo }] });
   } catch (_) {
-    return false;
+    try { await track.applyConstraints({ zoom: alvo }); } catch (__) { return null; }
   }
+  const set = track.getSettings ? track.getSettings() : {};
+  return typeof set.zoom === 'number' ? set.zoom : alvo;
+}
+
+/**
+ * Volta ao enquadramento mais aberto possível (~1x). É o que corrige a impressão de
+ * "já abriu em 2x": o zoom é aplicado DEPOIS de escolher a resolução de vídeo, porque
+ * trocar a resolução pode mudar o recorte do sensor.
+ */
+export async function zerarZoom(track) {
+  const lim = limitesZoom(track);
+  if (!lim) return null;
+  return aplicarZoom(track, Math.max(lim.min, 1));
 }
 
 /** Sobe a resolução até o máximo que a câmera informa, mantendo o melhor resultado. */
@@ -179,15 +209,18 @@ export async function abrirCameraPrincipal(md) {
     throw new CameraErro('lente-errada', 'O aparelho abriu uma lente que não é a principal (1x). Use "Enviar foto".');
   }
 
-  // 5) 1x e resolução máxima: assim a foto final tem a maior resolução disponível.
-  const zoomAjustado = await garantirZoom1x(track);
+  // 5) Resolução máxima (a foto final sai no maior tamanho) e depois a pré-visualização
+  //    em resolução menor: quadros de 12 MP desenhados a cada frame travam a tela.
   await subirResolucao(track);
   const final = track.getSettings ? track.getSettings() : {};
   const maxima = { largura: final.width || null, altura: final.height || null };
-
-  // 6) Pré-visualização em resolução menor. Quadros de 12 MP sendo desenhados a
-  //    cada frame travam a tela do celular; a foto continua saindo no tamanho máximo.
   const previa = await reduzirParaPrevia(track, maxima);
+
+  // 6) Zoom por ÚLTIMO: trocar a resolução muda o recorte do sensor, então zerar o zoom
+  //    antes dela deixava a imagem parecendo 2x ao abrir.
+  const zoomInicial = await zerarZoom(track);
+  const zoomAjustado = zoomInicial != null;
+  const zoomLimites = limitesZoom(track);
 
   return {
     stream,
@@ -201,6 +234,10 @@ export async function abrirCameraPrincipal(md) {
       maxima,
       previa,
       zoomAjustado,
+      zoom: zoomInicial,
+      zoomLimites: zoomLimites ? { min: zoomLimites.min, max: zoomLimites.max, passo: zoomLimites.passo } : null,
+      // O aparelho pode não deixar ir mais aberto que isto (aí não há 1x real).
+      zoomPiso: zoomLimites ? Math.max(zoomLimites.min, 1) : null,
     },
   };
 }
