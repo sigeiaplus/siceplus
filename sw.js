@@ -1,6 +1,13 @@
 /* SICEP+ · Service Worker (app shell) */
 
-const CACHE = 'sicep-v1';
+// Suba o número a cada entrega que mude arquivos do app (força o aparelho a baixar tudo de novo).
+const CACHE = 'sicep-v5';
+
+// O OpenCV (~13 MB) fica em cache próprio e com versão própria: subir o CACHE acima
+// NÃO apaga o OpenCV, então ninguém baixa 13 MB de novo a cada atualização do app.
+// Só mude este nome se trocar o arquivo js/lib/opencv.js.
+const CACHE_OPENCV = 'sicep-opencv-v1';
+const URL_OPENCV = './js/lib/opencv.js';
 
 const SHELL = [
   './',
@@ -16,6 +23,13 @@ const SHELL = [
   './js/config.js',
   './js/nuvem.js',
   './js/lib/qrcode.js',
+  './js/leitor/geometria.js',
+  './js/leitor/opencv-loader.js',
+  './js/leitor/leitor.js',
+  './js/leitor/omr.js',
+  './js/leitor/cartao-svg.js',
+  './js/leitor/camera.js',
+  './js/leitor/associacao.js',
   './js/screens/login.js',
   './js/screens/estado.js',
   './js/screens/home.js',
@@ -28,13 +42,13 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (ev) => {
-  ev.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  ev.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (ev) => {
   ev.waitUntil(
     caches.keys()
-      .then((chaves) => Promise.all(chaves.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((chaves) => Promise.all(chaves.filter((k) => k !== CACHE && k !== CACHE_OPENCV).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -53,6 +67,21 @@ self.addEventListener('fetch', (ev) => {
           return resp;
         })
         .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  // OpenCV: cache próprio, guarda só resposta boa (a 1ª leitura online deixa a leitura offline pronta).
+  if (new URL(req.url).pathname.endsWith('/js/lib/opencv.js')) {
+    ev.respondWith(
+      caches.open(CACHE_OPENCV).then((c) =>
+        c.match(URL_OPENCV).then((hit) =>
+          hit || fetch(req).then((resp) => {
+            if (resp.ok) c.put(URL_OPENCV, resp.clone());
+            return resp;
+          })
+        )
+      )
     );
     return;
   }

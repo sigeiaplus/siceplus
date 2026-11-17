@@ -4,6 +4,8 @@ import {
   barraDesempenho, desempenhoTexto,
 } from '../ui.js';
 import { carregarOpenCV } from '../leitor/opencv-loader.js';
+import { abrirCameraPrincipal, CameraErro } from '../leitor/camera.js';
+import { codigoDe, igual, decidirQR, validarAssociacao as validarAssoc } from '../leitor/associacao.js';
 import { detectarMarcadores, lerQR, desenharRevisao } from '../leitor/leitor.js';
 import { processarCartao, carregarParametros, salvarParametros, restaurarParametros } from '../leitor/omr.js';
 
@@ -35,8 +37,6 @@ const MSG_BLOQUEIO = {
   grade: 'As bolinhas deste cartão não batem com o layout da avaliação (cartão de outra versão, cortado ou torto). Nada foi lido.',
 };
 
-const codigoDe = (av) => String(av?.layout?.codigo_caderno || 'SICEP-A').trim();
-const igual = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 const dorme = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export default function leitura(params) {
@@ -70,9 +70,10 @@ export default function leitura(params) {
       <video playsinline muted autoplay aria-label="Imagem da câmera"></video>
       <img data-cf-img alt="Cartão capturado" hidden />
       <div class="cf-top">
-        <button class="cf-btn" type="button" data-cf-fechar aria-label="Fechar câmera">${icon('close', 20)}</button>
+        <button class="cf-btn" type="button" data-cf-voltar aria-label="Voltar">${icon('left', 20)}</button>
         <div class="cf-quem"><strong data-cf-aluno></strong><span data-cf-turma></span></div>
         <button class="cf-btn" type="button" data-cf-torch hidden aria-label="Lanterna">${icon('torch', 18)}</button>
+        <button class="cf-btn" type="button" data-cf-fechar aria-label="Fechar câmera">${icon('close', 20)}</button>
       </div>
       <div class="cf-instr">
         <span class="cf-passo" data-cf-passo></span>
@@ -83,12 +84,9 @@ export default function leitura(params) {
         <span class="c tl"></span><span class="c tr"></span><span class="c bl"></span><span class="c br"></span>
       </div>
       <div class="cf-status" data-cf-status></div>
+      <button class="cf-refazer" type="button" data-cf-refazer hidden>${icon('camera', 16)} Refazer</button>
       <div class="cf-aviso" data-cf-aviso hidden></div>
       <div class="cf-escolha" data-cf-escolha hidden></div>
-      <div class="cf-manual" data-cf-manualbox hidden>
-        <input class="input mono" type="text" maxlength="50" data-cf-codigo placeholder="Código do caderno" autocapitalize="characters" spellcheck="false" />
-        <button class="btn btn-primary btn-sm" type="button" data-cf-codigo-ok>OK</button>
-      </div>
       <div class="cf-baixo">
         <button class="cf-sec" type="button" data-cf-arquivo>Enviar foto</button>
         <button class="cf-obturador" type="button" data-cf-tirar disabled aria-label="Tirar foto"><span></span></button>
@@ -106,7 +104,7 @@ export default function leitura(params) {
   const ov = {
     aberto: false, passo: 'qr', cv: null, cvErro: null, camErro: null,
     marc: 0, ocupacao: null, ocupado: false, processando: false,
-    aviso: null, erro: null, escolha: null, timer: null,
+    aviso: null, erro: null, escolha: null, timer: null, camInfo: null,
   };
 
   const quadroCanvas = document.createElement('canvas');
@@ -162,16 +160,18 @@ export default function leitura(params) {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       ov.camErro = 'Este navegador não libera a câmera para a página. Use "Enviar foto".'; return;
     }
-    const tentativas = [
-      { audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } },
-      { audio: false, video: { facingMode: 'environment' } },
-      { audio: false, video: true },
-    ];
-    let ultimoErro = null;
-    for (const restricoes of tentativas) {
-      try { stream = await navigator.mediaDevices.getUserMedia(restricoes); break; } catch (e) { ultimoErro = e; }
+    // Somente a câmera traseira principal (1x), na maior resolução. Sem plano B com outra lente:
+    // se não der para identificá-la com segurança, o erro explica a limitação (js/leitor/camera.js).
+    try {
+      const r = await abrirCameraPrincipal(navigator.mediaDevices);
+      stream = r.stream;
+      ov.camInfo = r.info;
+      console.info('[SICEP+] câmera:', r.info.label, r.info.largura + 'x' + r.info.altura, '(' + r.info.confianca + ')');
+    } catch (e) {
+      stream = null;
+      ov.camErro = e instanceof CameraErro ? e.message : mensagemCamera(e);
+      return;
     }
-    if (!stream) { ov.camErro = mensagemCamera(ultimoErro); return; }
     if (!ov.aberto) { pararCamera(); return; }   // fechou enquanto a permissão era pedida
 
     try {
@@ -208,14 +208,19 @@ export default function leitura(params) {
       ? 'Aponte para o QR Code do caderno de prova.'
       : 'Enquadre o cartão inteiro, com os 4 quadrados pretos visíveis.';
     $cf('[data-cf-alvo]').className = 'cf-alvo ' + (qr ? 'qr' : 'cartao') + (!qr && ov.marc >= 2 ? ' ok' : '');
-    $cf('[data-cf-manual]').textContent = qr ? 'Digitar código' : 'Lançar manualmente';
+    // Passo do QR: o caderno só é identificado pela leitura do QR Code (sem digitar código).
+    const bm = $cf('[data-cf-manual]');
+    bm.textContent = 'Lançar manualmente';
+    bm.style.visibility = qr ? 'hidden' : 'visible';
+    bm.disabled = qr;
+    bm.tabIndex = qr ? -1 : 0;
 
     let status = '', cls = '';
     if (ov.erro) { status = ''; }
     else if (ov.processando) { status = 'Lendo o cartão…'; cls = 'busy'; }
+    else if (ov.camErro) { status = ov.camErro; cls = 'err'; }
     else if (ov.cvErro) { status = 'Não foi possível carregar o leitor óptico.'; cls = 'err'; }
     else if (!ov.cv) { status = 'Carregando o leitor óptico…'; cls = 'busy'; }
-    else if (ov.camErro) { status = ov.camErro; cls = 'err'; }
     else if (qr) { status = ov.aviso ? '' : 'Procurando o QR Code…'; }
     else if (ov.marc >= 2) {
       status = '4 marcadores detectados — pode fotografar';
@@ -233,14 +238,13 @@ export default function leitura(params) {
     const msg = ov.erro || ov.aviso;
     av.hidden = !msg;
     av.className = 'cf-aviso ' + (ov.erro ? 'err' : 'warn');
-    av.innerHTML = msg ? `<span>${esc(msg)}</span>${ov.erro ? '<button type="button" class="btn btn-primary btn-sm" data-cf-retry>Tentar de novo</button>' : ''}` : '';
-    av.querySelector('[data-cf-retry]')?.addEventListener('click', () => {
-      ov.erro = null;
-      $cf('[data-cf-img]').hidden = true;
-      video.hidden = false;
-      ov.marc = 0;
-      atualizarOverlay();
-    });
+    av.innerHTML = msg ? `<span>${esc(msg)}</span>` : '';
+
+    // Refazer: aparece quando há algo a refazer (leitura que falhou ou câmera que não abriu).
+    $cf('[data-cf-refazer]').hidden = !(ov.erro || ov.camErro) || ov.processando;
+    // Voltar/Fechar ficam travados enquanto o cartão é processado (evita resultado chegando numa tela que já mudou).
+    $cf('[data-cf-voltar]').disabled = ov.processando;
+    $cf('[data-cf-fechar]').disabled = ov.processando;
 
     const esc2 = $cf('[data-cf-escolha]');
     esc2.hidden = !ov.escolha;
@@ -256,7 +260,7 @@ export default function leitura(params) {
     }
 
     const tirar = $cf('[data-cf-tirar]');
-    tirar.disabled = !ov.cv || ov.processando || !!ov.erro || !!ov.escolha || (!qr && ov.marc < 2);
+    tirar.disabled = !ov.cv || !!ov.camErro || ov.processando || !!ov.erro || !!ov.escolha || (!qr && ov.marc < 2);
   }
 
   function avisoTemporario(msg, ms = 3500) {
@@ -269,36 +273,33 @@ export default function leitura(params) {
   /* ---- passo 1: QR do caderno ---- */
 
   function tratarQR(texto) {
-    const t = String(texto || '').trim();
-    if (!t) return false;
-    const naTurma = avaliacoesDaTurma();
-
-    if (st.avaliacaoFixa && st.avaliacaoId) {
-      const fixa = avaliacao();
-      if (!igual(codigoDe(fixa), t)) {
-        avisoTemporario(`Este QR é de outra avaliação ("${t}"). Esperado: "${codigoDe(fixa)}" (${fixa?.titulo || ''}).`);
-        return false;
-      }
-      return aceitarAvaliacao(fixa);
-    }
-
-    const candidatas = naTurma.filter((a) => igual(codigoDe(a), t));
-    if (!candidatas.length) {
-      avisoTemporario(`O QR "${t}" não pertence a nenhuma avaliação desta turma.`);
+    const d = decidirQR(texto, {
+      avaliacoesDaTurma: avaliacoesDaTurma(),
+      fixa: st.avaliacaoFixa && st.avaliacaoId ? avaliacao() : null,
+    });
+    if (d.tipo === 'vazio') return false;
+    if (d.tipo === 'outra') {
+      avisoTemporario(`Este QR é de outra avaliação ("${d.lido}"). Esperado: "${d.esperado}" (${d.avaliacao?.titulo || ''}).`);
       return false;
     }
-    if (candidatas.length > 1) {
-      ov.escolha = candidatas;
+    if (d.tipo === 'nenhuma') {
+      avisoTemporario(`O QR "${d.lido}" não pertence a nenhuma avaliação desta turma.`);
+      return false;
+    }
+    if (d.tipo === 'escolha') {
+      ov.escolha = d.candidatas;
       atualizarOverlay();
       return false;
     }
-    return aceitarAvaliacao(candidatas[0]);
+    return aceitarAvaliacao(d.avaliacao);
   }
 
+  const validarAssociacao = (av) => validarAssoc(store, av, st.alunoId, st.turmaId);
+
   function aceitarAvaliacao(av) {
-    const existente = store.resultadoDoAluno(av.id, st.alunoId, st.turmaId);
-    if (existente && existente.status === 'confirmado') {
-      avisoTemporario(`Este aluno já tem resultado confirmado em "${av.titulo}".`, 5000);
+    const v = validarAssociacao(av);
+    if (!v.ok) {
+      avisoTemporario(v.motivo, 5000);
       return false;
     }
     st.avaliacaoId = av.id;
@@ -337,6 +338,7 @@ export default function leitura(params) {
       r = { ok: false, bloqueado: true, motivo: 'erro', mensagem: 'Erro ao processar a imagem: ' + (e?.message || e) };
     }
     ov.processando = false;
+    if (!ov.aberto) return;   // a câmera foi fechada durante a leitura: não mexe na tela
 
     if (!r.ok) {
       let msg = MSG_BLOQUEIO[r.motivo] || r.mensagem || 'Não foi possível ler este cartão.';
@@ -428,6 +430,26 @@ export default function leitura(params) {
     });
   }
 
+  /** Tela cheia do navegador (some a barra de endereço). Melhor esforço: o iPhone não permite, e aí vale o 100dvh do CSS. */
+  function entrarTelaCheia() {
+    const raiz = document.documentElement;
+    const fn = raiz.requestFullscreen || raiz.webkitRequestFullscreen;
+    if (!fn || document.fullscreenElement || document.webkitFullscreenElement) return;
+    try {
+      const pr = fn.call(raiz);
+      if (pr && pr.catch) pr.catch(() => {});
+    } catch (_) { /* sem tela cheia: segue com o overlay fixo */ }
+  }
+
+  function sairTelaCheia() {
+    if (!(document.fullscreenElement || document.webkitFullscreenElement)) return;
+    const fn = document.exitFullscreen || document.webkitExitFullscreen;
+    try {
+      const pr = fn && fn.call(document);
+      if (pr && pr.catch) pr.catch(() => {});
+    } catch (_) { /* ignora */ }
+  }
+
   async function abrirCamera() {
     const aluno = store.aluno(st.alunoId);
     if (!aluno) return;
@@ -439,9 +461,9 @@ export default function leitura(params) {
     $cf('[data-cf-aluno]').textContent = aluno.nome_completo || '';
     $cf('[data-cf-turma]').textContent = store.turma(st.turmaId)?.nome || '';
     $cf('[data-cf-img]').hidden = true;
-    $cf('[data-cf-manualbox]').hidden = true;
     cf.hidden = false;
     document.body.classList.add('cam-open');
+    entrarTelaCheia();   // ainda no gesto do toque; não há await antes
     atualizarOverlay();
 
     if (!ov.cv) carregarLeitor();
@@ -459,12 +481,47 @@ export default function leitura(params) {
     $cf('[data-cf-torch]').hidden = true;
     cf.hidden = true;
     document.body.classList.remove('cam-open');
+    sairTelaCheia();
   }
 
   $cf('[data-cf-fechar]').addEventListener('click', () => {
+    if (ov.processando) return;
     fecharOverlay();
     st.etapa = 'cartao';
     pintar();
+  });
+
+  // Voltar: cartão → QR do caderno; QR → lista de alunos.
+  $cf('[data-cf-voltar]').addEventListener('click', () => {
+    if (ov.processando) return;
+    if (ov.passo === 'cartao') {
+      st.qrLido = false;
+      if (!st.avaliacaoFixa) st.avaliacaoId = null;   // avaliação escolhida à mão continua valendo; o QR precisa bater com ela
+      ov.passo = 'qr';
+      ov.marc = 0; ov.ocupacao = null; ov.aviso = null; ov.erro = null; ov.escolha = null;
+      $cf('[data-cf-img]').hidden = true;
+      video.hidden = false;
+      atualizarOverlay();
+      return;
+    }
+    fecharOverlay();
+    st.etapa = 'aluno';
+    pintar();
+  });
+
+  // Refazer: descarta a leitura que falhou e volta à imagem ao vivo; se a câmera não abriu, tenta abrir de novo.
+  $cf('[data-cf-refazer]').addEventListener('click', async () => {
+    if (ov.processando) return;
+    const refazCamera = !!ov.camErro;
+    ov.erro = null; ov.aviso = null; ov.marc = 0; ov.ocupacao = null;
+    $cf('[data-cf-img]').hidden = true;
+    video.hidden = false;
+    if (refazCamera) {
+      pararCamera();
+      atualizarOverlay();
+      await ligarCamera();
+    }
+    atualizarOverlay();
   });
 
   $cf('[data-cf-arquivo]').addEventListener('click', () => fileInput.click());
@@ -494,25 +551,13 @@ export default function leitura(params) {
   });
 
   $cf('[data-cf-manual]').addEventListener('click', () => {
-    if (ov.passo === 'qr') {
-      const box = $cf('[data-cf-manualbox]');
-      box.hidden = !box.hidden;
-      if (!box.hidden) $cf('[data-cf-codigo]').focus();
-      return;
-    }
+    if (ov.passo === 'qr') return;   // sem digitação de código no passo do QR
     // Lançamento manual: sem foto, o professor marca tudo.
     fecharOverlay();
     iniciarManual();
     st.etapa = 'conferencia';
     pintar();
   });
-
-  const aplicarCodigo = () => {
-    const v = $cf('[data-cf-codigo]').value;
-    if (tratarQR(v)) $cf('[data-cf-manualbox]').hidden = true;
-  };
-  $cf('[data-cf-codigo-ok]').addEventListener('click', aplicarCodigo);
-  $cf('[data-cf-codigo]').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); aplicarCodigo(); } });
 
   /* ---------------- Dados auxiliares ---------------- */
 
@@ -700,6 +745,8 @@ export default function leitura(params) {
     const av = avaliacao();
     const apl = aplicacao();
     if (!av || !apl) { toast('Avaliação/turma não identificada.', 'err'); return; }
+    const assoc = validarAssociacao(av);   // revalida no lançamento (o estado pode ter mudado desde o QR)
+    if (!assoc.ok) { toast(assoc.motivo + ' Nada foi salvo.', 'err'); return; }
     const pode = podeSalvar();
     if (!pode.ok) { toast(pode.motivo || 'Aguarde.', 'err'); return; }
     if (st.modo === 'foto' && st.processo?.etapas?.qr?.texto && !igual(st.processo.etapas.qr.texto, codigoDe(av))) {
@@ -1377,6 +1424,7 @@ export default function leitura(params) {
       ov.aberto = false;
       clearTimeout(ov.timer);
       document.body.classList.remove('cam-open');
+      sairTelaCheia();
       pararCamera();
     },
   };
