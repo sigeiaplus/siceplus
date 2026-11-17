@@ -56,9 +56,9 @@ export default function avaliacaoDetalhe(params) {
 
         ${pendentes.length ? `
           <div class="row wrap" style="margin-top:12px;gap:8px">
-            <button class="btn btn-outline btn-sm" type="button" data-confirmar-todos="${esc(t.id)}">
-              ${icon('check', 14)} Confirmar ${pendentes.length} pendente(s)
-            </button>
+            <a class="btn btn-outline btn-sm" href="#/resultados">
+              ${icon('check', 14)} Revisar ${pendentes.length} pendente(s) em Resultados
+            </a>
           </div>` : ''}
 
         ${av.lancar_sided ? `
@@ -71,7 +71,7 @@ export default function avaliacaoDetalhe(params) {
             </div>
             <button class="btn btn-outline btn-sm" type="button" data-sided="${esc(t.id)}"
                     ${confirmados.length ? '' : 'disabled'}>
-              ${icon('cloud', 14)} Enviar ${confirmados.length} nota(s) ao SIDED+
+              ${icon('cloud', 14)} Enviar ${confirmados.length} nota(s) revisada(s) ao SIDED+
             </button>
           </div>` : ''}
 
@@ -147,19 +147,6 @@ export default function avaliacaoDetalhe(params) {
         <p class="xs muted" style="margin-top:10px">Questões anuladas são creditadas a todos os alunos.</p>
       </section>
     `;
-
-    root.querySelectorAll('[data-confirmar-todos]').forEach((b) => {
-      b.addEventListener('click', async () => {
-        const turmaId = b.dataset.confirmarTodos;
-        const pendentes = store.resultadosDaAvaliacao(av.id, turmaId).filter((r) => r.status !== 'confirmado');
-        for (const r of pendentes) {
-          const res = await store.confirmarResultado(r.id);
-          if (!res.ok) { toast(res.erro, 'err'); return; }
-        }
-        toast(`${pendentes.length} nota(s) confirmada(s).`, 'ok');
-        pintar();
-      });
-    });
 
     root.querySelectorAll('[data-sided]').forEach((b) => {
       b.addEventListener('click', async () => {

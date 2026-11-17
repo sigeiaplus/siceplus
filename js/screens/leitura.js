@@ -68,7 +68,23 @@ export default function leitura(params) {
     ativa: null,
     salvando: false,
     resultado: null,
+    releitura: false,       // veio de Resultados para refazer a leitura de um registro
   };
+
+  // Releitura de um resultado já registrado: #/leitura/<avaliacao>/<aluno>.
+  // O fluxo continua o mesmo (QR do caderno → confirmação → leitura do cartão).
+  if (params?.[0] && params?.[1]) {
+    const alvo = store.aluno(params[1]);
+    const av = store.avaliacao(params[0]);
+    if (alvo && av && store.aplicacaoDe(av, alvo.turma_id)) {
+      st.turmaId = alvo.turma_id;
+      st.alunoId = alvo.id;
+      st.avaliacaoId = av.id;
+      st.avaliacaoFixa = true;
+      st.releitura = true;
+      st.etapa = 'cartao';
+    }
+  }
 
   /* ---------------- Overlay da câmera (tela cheia) ---------------- */
 
@@ -920,12 +936,16 @@ export default function leitura(params) {
         confianca,
         situacao: 'normal',
         imagemRef: null,
-        revisado: true,
+        // Toda leitura entra em revisão: a nota só vai ao SIDED+ depois que o
+        // professor confirmar aluno por aluno na aba Resultados.
+        revisado: false,
+        substituir: st.releitura,
       });
 
       if (!r.ok) { toast(r.erro, 'err'); return; }
       if (r.aviso) toast(r.aviso, 'err');
 
+      st.releitura = false;
       st.resultado = r.resultado;
       st.etapa = 'resultado';
       pintar();
@@ -1316,6 +1336,7 @@ export default function leitura(params) {
         st.avaliacaoId = null;
         st.avaliacaoFixa = false;
         st.qrLido = false;
+        st.releitura = false;
         st.etapa = 'cartao';
         pintar();
         abrirCamera();
@@ -1343,7 +1364,7 @@ export default function leitura(params) {
 
   function etapaCartao() {
     const aluno = store.aluno(st.alunoId);
-    const av = st.qrLido ? avaliacao() : null;
+    const av = (st.qrLido || st.releitura) && st.avaliacaoId ? avaliacao() : null;
     body.innerHTML = `
       <div class="capture-head">
         <button class="icon-btn" type="button" data-voltar-aluno aria-label="Voltar">${icon('left', 18)}</button>
@@ -1354,14 +1375,22 @@ export default function leitura(params) {
         ${av ? badge('Caderno ' + codigoDe(av), 'y') : ''}
       </div>
 
+      ${st.releitura ? `
+        <div class="alert y">
+          ${icon('refresh', 16)}
+          <span>Reler o cartão de <strong>${esc(aluno?.nome_completo || '')}</strong> em <strong>${esc(av?.titulo || '')}</strong>.
+            A nota atual só é substituída depois que você confirmar a nova correção.</span>
+        </div>` : ''}
+
       <div class="card stack">
         <p class="small" style="margin:0">${av
-          ? `Avaliação: <strong>${esc(av.titulo)}</strong>. Leia o cartão resposta.`
+          ? `Avaliação: <strong>${esc(av.titulo)}</strong>. Leia o QR Code do caderno e depois o cartão resposta.`
           : 'Leia o QR Code do caderno e depois o cartão resposta.'}</p>
         <button class="btn btn-primary btn-block" type="button" data-abrir-cam>${icon('camera', 17)} ${av ? 'Ler o cartão resposta' : 'Abrir a câmera'}</button>
       </div>
     `;
     body.querySelector('[data-voltar-aluno]').addEventListener('click', () => {
+      st.releitura = false;   // sair da releitura volta ao fluxo normal
       st.etapa = 'aluno';
       pintar();
     });
@@ -1429,7 +1458,8 @@ export default function leitura(params) {
 
       <div class="alert y">
         ${icon('info', 16)}
-        <span>Nada duvidoso é salvo sozinho. Questões em branco contam como erro.</span>
+        <span>Nada duvidoso é salvo sozinho. Questões em branco contam como erro.
+          A nota fica em revisão até você confirmar em <a href="#/resultados">Resultados</a>.</span>
       </div>
 
       <p class="xs strong" data-dica-salvar style="color:var(--warn)" ${pode.motivo ? '' : 'hidden'}>${esc(pode.motivo)}</p>
@@ -1525,6 +1555,11 @@ export default function leitura(params) {
           <div><span class="k">Situação</span><span class="v">${esc(store.SITUACOES[r.situacao]?.rotulo || r.situacao || '—')}</span></div>
           <div><span class="k">Registro</span><span class="v">${r.status === 'confirmado' ? 'Confirmado' : 'Revisão pendente'}</span></div>
         </div>
+
+        ${r.status === 'confirmado' ? '' : `
+          <p class="xs muted" style="margin:0">
+            A nota foi gravada em revisão. Confirme em <a href="#/resultados">Resultados</a> antes de enviar ao SIDED+.
+          </p>`}
       </div>
 
       <div class="btn-group">

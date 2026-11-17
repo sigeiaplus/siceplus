@@ -33,6 +33,7 @@ const ROTAS = [
   { re: /^#\/avaliacoes\/editar\/([\w-]+)$/, view: novaAvaliacaoScreen, titulo: 'Editar avaliação' },
   { re: /^#\/avaliacoes\/([\w-]+)$/, view: avaliacaoDetalheScreen, titulo: 'Avaliação' },
   { re: /^#\/cartoes(?:\/([\w-]+))?$/, view: cartoesScreen, titulo: 'Cartões de respostas' },
+  { re: /^#\/leitura\/([\w-]+)\/([\w-]+)$/, view: leituraScreen, titulo: 'Reler cartão' },
   { re: /^#\/leitura$/, view: leituraScreen, titulo: 'Leitura de cartões' },
   { re: /^#\/resultados$/, view: resultadosScreen, titulo: 'Resultados' },
 ];

@@ -183,7 +183,10 @@ export async function carregarContexto() {
  * recurso quando a coluna é encontrada — nunca grava às cegas.
  */
 export async function detectarRecursos() {
-  const recursos = { prazo: false, faixas: false, anulada: false, situacao: false, status: false, turma_disciplina: false };
+  const recursos = {
+    prazo: false, faixas: false, anulada: false, situacao: false, status: false,
+    turma_disciplina: false, revisado: false, enviado: false,
+  };
 
   const teste = async (path, chave) => {
     try {
@@ -201,6 +204,8 @@ export async function detectarRecursos() {
     teste('sicep_resultados?select=situacao', 'situacao'),
     teste('sicep_resultados?select=status', 'status'),
     teste('sicep_resultados?select=turma_disciplina_id', 'turma_disciplina'),
+    teste('sicep_resultados?select=revisado_em', 'revisado'),
+    teste('sicep_resultados?select=enviado_sided_em', 'enviado'),
   ]);
 
   return recursos;
@@ -427,51 +432,87 @@ export async function registrarScan({ resultado_id, imagem_url, respostas_detect
 /* ---------------- Integração SIDED+ ---------------- */
 
 /**
- * Cria (uma única vez) a avaliação espelhada no SIDED+ para a turma e
- * grava as notas em `notas` com upsert em (avaliacao_id, aluno_id).
+ * A avaliação do SIDED+ pertence a UMA turma (avaliacoes.turma_id).
+ * Um instrumento do SICEP+ pode valer para várias turmas, portanto o vínculo
+ * é por turma — nunca um id único no instrumento (era isso que fazia o envio
+ * de uma turma cair na avaliação/turma da primeira e criava registros repetidos).
+ */
+
+/** Id guardado no SICEP+ só vale se for mesmo da turma que está sendo enviada. */
+async function sidedDaTurma(sidedId, turmaId) {
+  if (!sidedId) return null;
+  try {
+    const linhas = await api(`avaliacoes?id=eq.${sidedId}&select=id,turma_id,nome,pontos,trimestre&limit=1`) || [];
+    const l = linhas[0];
+    return l && l.turma_id === turmaId ? l : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Procura a avaliação equivalente já existente (mesma turma, nome, trimestre e pontos). */
+async function sidedEquivalente({ turmaId, nome, pontos, trimestre }) {
+  if (!nome) return null;
+  const linhas = await api(
+    `avaliacoes?turma_id=eq.${turmaId}&trimestre=eq.${trimestre}` +
+    `&nome=eq.${encodeURIComponent(nome)}` +
+    '&select=id,turma_id,nome,pontos,trimestre,data,created_at&order=created_at.asc'
+  ) || [];
+  return linhas.find((l) => Math.abs(Number(l.pontos || 0) - Number(pontos || 0)) < 0.005) || null;
+}
+
+/**
+ * Garante a avaliação espelhada no SIDED+ para ESTA turma e grava as notas em
+ * `notas` (upsert em avaliacao_id, aluno_id).
  *
  * Regras conferidas no banco:
  * - avaliacoes: turma_id e professor_id (professores.id) são obrigatórios;
  *   pontos > 0; trimestre ∈ {1,2,3}; tipo = 'normal'.
- * - notas: UNIQUE (avaliacao_id, aluno_id) → upsert seguro.
+ * - notas: UNIQUE (avaliacao_id, aluno_id) → upsert idempotente (sem duplicar).
+ * - notas NÃO tem professor_id (não enviar essa coluna).
  * - Ausência/abstenção: notas.ausente / notas.nao_realizado.
  */
 export async function enviarNotasSided({ avaliacaoSicep, turma, turmaDisciplinaId, professorId, trimestre, items }) {
-  let sidedId = avaliacaoSicep.sided_avaliacao_id;
+  if (!turma?.id) throw new Error('Turma não identificada para o envio ao SIDED+.');
 
-  if (!sidedId) {
-    const [criada] = await api('avaliacoes?select=*', {
+  const nome = String(avaliacaoSicep.titulo || '').trim();
+  const pontos = Number(avaliacaoSicep.valor_total) || 0;
+  const trim = Number(trimestre) || 1;
+
+  let sided = await sidedDaTurma(avaliacaoSicep.sided_avaliacao_id, turma.id);
+  if (!sided) sided = await sidedEquivalente({ turmaId: turma.id, nome, pontos, trimestre: trim });
+
+  let criada = false;
+  if (!sided) {
+    const [nova] = await api('avaliacoes?select=*', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
       body: JSON.stringify({
-        nome: avaliacaoSicep.titulo,
-        pontos: avaliacaoSicep.valor_total,
-        trimestre,
+        nome,
+        pontos,
+        trimestre: trim,
         tipo: 'normal',
         turma_id: turma.id,
         professor_id: professorId,
         turma_disciplina_id: turmaDisciplinaId || null,
         disciplina: avaliacaoSicep.disciplina || null,
-        data: avaliacaoSicep.data_aplicacao,
+        data: avaliacaoSicep.data_aplicacao || null,
         observacoes: 'Registrada pelo SICEP+',
       }),
-    });
-    sidedId = criada.id;
-    await api(`sicep_avaliacoes?id=eq.${avaliacaoSicep.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ sided_avaliacao_id: sidedId }),
-    });
+    }) || [];
+    if (!nova?.id) throw new Error('O SIDED+ não devolveu a avaliação criada.');
+    sided = nova;
+    criada = true;
   }
 
   const notas = items.map((i) => ({
-    avaliacao_id: sidedId,
+    avaliacao_id: sided.id,
     aluno_id: i.aluno_id,
     nota: i.nota,
     ausente: i.situacao === 'ausente',
     nao_realizado: ['abstencao', 'nao_entregue'].includes(i.situacao),
     turma_id: turma.id,
     turma_disciplina_id: turmaDisciplinaId || null,
-    professor_id: professorId,
   }));
 
   if (notas.length) {
@@ -482,7 +523,7 @@ export async function enviarNotasSided({ avaliacaoSicep, turma, turmaDisciplinaI
     });
   }
 
-  return { sided_avaliacao_id: sidedId, enviados: notas.length };
+  return { sided_avaliacao_id: sided.id, enviados: notas.length, criada };
 }
 
 export { api };

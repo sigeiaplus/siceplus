@@ -152,6 +152,8 @@ function montar(ctx, avs, resultados) {
       confianca: r.confianca != null ? Number(r.confianca) : null,
       situacao,
       status: r.status || 'confirmado',
+      revisado_em: r.revisado_em || null,
+      enviado_em: r.enviado_sided_em || null,
       origem: 'leitura',
       criado_em: r.created_at,
       registrado_por: r.registrado_por,
@@ -496,6 +498,7 @@ export function progresso(av, turmaId) {
 export async function salvarResultado({
   avaliacao: av, aplicacao: apl, alunoId, respostas = {},
   confianca = null, situacao = 'normal', imagemRef = null, observacao = '', revisado = false,
+  substituir = false,
 }) {
   if (!av || !apl) return { ok: false, erro: 'Avaliação ou turma não identificada.' };
   if (!situacaoSuportada(situacao)) {
@@ -503,7 +506,9 @@ export async function salvarResultado({
   }
 
   const existente = resultadoDoAluno(av.id, alunoId, apl.turma_id);
-  if (existente && existente.status === 'confirmado') {
+  // Releitura explícita (vinda de Resultados) pode substituir uma nota confirmada;
+  // a nova leitura volta para revisão e só é reenviada depois da sua confirmação.
+  if (existente && existente.status === 'confirmado' && !substituir) {
     return { ok: false, erro: 'Já existe resultado confirmado para este aluno nesta avaliação.' };
   }
 
@@ -525,6 +530,7 @@ export async function salvarResultado({
   if (recursos.situacao) payload.situacao = situacao;
   if (recursos.turma_disciplina) payload.turma_disciplina_id = apl.turma_disciplina_id;
   if (recursos.status || recursos.situacao) payload.status = status;
+  if (recursos.revisado) payload.revisado_em = status === 'confirmado' ? new Date().toISOString() : null;
 
   let id = existente?.id || null;
   try {
@@ -563,6 +569,8 @@ export async function salvarResultado({
     confianca,
     situacao,
     status: recursos.status || recursos.situacao ? status : 'confirmado',
+    revisado_em: recursos.revisado && status === 'confirmado' ? new Date().toISOString() : null,
+    enviado_em: existente?.enviado_em || null,
     origem: 'leitura',
     criado_em: existente?.criado_em || hojeISO(),
     registrado_por: db.sessao.usuario_id,
@@ -596,16 +604,44 @@ export async function confirmarResultado(id) {
     return { ok: false, erro: 'A coluna de status de revisão ainda não existe em sicep_resultados; nada foi alterado.' };
   }
 
+  const agora = new Date().toISOString();
+  const patch = { status: 'confirmado' };
+  if (recursos.revisado) patch.revisado_em = agora;
+
   try {
     await nuvem.api(`sicep_resultados?id=eq.${r.id}`, {
       method: 'PATCH',
-      body: JSON.stringify(recursos.situacao ? { status: 'confirmado' } : { status: 'confirmado' }),
+      body: JSON.stringify(patch),
     });
   } catch (e) {
     return { ok: false, erro: 'Falha ao confirmar: ' + e.message };
   }
   r.status = 'confirmado';
+  if (recursos.revisado) r.revisado_em = agora;
   return { ok: true };
+}
+
+/**
+ * Exclui somente o resultado do SICEP+. A nota já enviada ao SIDED+ não é
+ * apagada por aqui: notas do SIDED+ podem ter sido editadas pelo professor.
+ */
+export async function excluirResultado(id) {
+  const r = db.resultados.find((x) => x.id === id);
+  if (!r) return { ok: false, erro: 'Resultado não encontrado.' };
+
+  try {
+    await nuvem.api(`sicep_resultados?id=eq.${r.id}`, { method: 'DELETE' });
+  } catch (e) {
+    return { ok: false, erro: 'Falha ao excluir: ' + e.message };
+  }
+
+  // Scans vinculados são opcionais: se a tabela não existir, a exclusão já valeu.
+  try {
+    await nuvem.api(`sicep_ocr_scans?resultado_id=eq.${r.id}`, { method: 'DELETE' });
+  } catch (e) { /* tabela opcional */ }
+
+  db.resultados = db.resultados.filter((x) => x.id !== r.id);
+  return { ok: true, enviado: Boolean(r.enviado_em) };
 }
 
 export function resumo() {
@@ -619,30 +655,50 @@ export function resumo() {
 
 /* ---------------- SIDED+ ---------------- */
 
-export async function enviarAoSided(avaliacaoId, turmaId, trimestre = 1) {
+export async function enviarAoSided(avaliacaoId, turmaId, trimestre = 1, resultadoIds = null) {
   const av = avaliacao(avaliacaoId);
   const apl = aplicacaoDe(av, turmaId);
   if (!av || !apl) return { ok: false, erro: 'Avaliação/turma não encontrada.' };
   if (!av.lancar_sided) return { ok: false, erro: 'Esta avaliação não está marcada para lançar no SIDED+.' };
 
-  const lista = resultadosDaAvaliacao(av.id, turmaId).filter((r) => r.status === 'confirmado' && r.nota != null);
-  if (!lista.length) return { ok: false, erro: 'Nenhuma nota confirmada para enviar.' };
+  const idsAlunos = new Set(db.alunos.filter((a) => a.turma_id === turmaId).map((a) => a.id));
+  const pedidos = resultadoIds ? new Set(resultadoIds) : null;
+  const lista = resultadosDaAvaliacao(av.id, turmaId).filter((r) => {
+    if (pedidos && !pedidos.has(r.id)) return false;
+    return r.status === 'confirmado' && r.nota != null && idsAlunos.has(r.aluno_id);
+  });
+  if (!lista.length) return { ok: false, erro: 'Nenhuma nota revisada e confirmada para enviar.' };
 
   try {
     const r = await nuvem.enviarNotasSided({
-      avaliacaoSicep: { ...av, sided_avaliacao_id: apl.sided_avaliacao_id },
+      avaliacaoSicep: { ...av, sided_avaliacao_id: av.sided_avaliacao_id || apl.sided_avaliacao_id },
       turma: turma(turmaId),
       turmaDisciplinaId: apl.turma_disciplina_id,
       professorId: apl.professor_id,
-      trimestre,
+      trimestre: Number(trimestre) || 1,
       items: lista.map((x) => ({ aluno_id: x.aluno_id, nota: x.nota, situacao: x.situacao })),
     });
-    apl.sided_avaliacao_id = r.sided_avaliacao_id;
-    if (r.sided_avaliacao_id) {
-      const alvo = db.avaliacoes.find((x) => x.id === av.id);
-      if (alvo) alvo.sided_avaliacao_id = r.sided_avaliacao_id;
+
+    const agora = new Date().toISOString();
+    lista.forEach((x) => { x.enviado_em = agora; });
+    if (recursos.enviado) {
+      try {
+        await nuvem.api(`sicep_resultados?id=in.(${lista.map((x) => x.id).join(',')})`, {
+          method: 'PATCH',
+          body: JSON.stringify({ enviado_sided_em: agora }),
+        });
+      } catch (e) {
+        console.warn('[SICEP+] enviado_sided_em:', e.message);
+      }
     }
-    return { ok: true, enviados: r.enviados };
+
+    apl.sided_avaliacao_id = r.sided_avaliacao_id;
+    const alvoAv = db.avaliacoes.find((x) => x.id === av.id);
+    // Instrumento com várias turmas tem UMA avaliação por turma no SIDED+.
+    // Um id único no instrumento apontaria todas as turmas para a mesma avaliação.
+    if (alvoAv && (alvoAv.turmas_ids || []).length <= 1) alvoAv.sided_avaliacao_id = r.sided_avaliacao_id;
+
+    return { ok: true, enviados: r.enviados, criada: !!r.criada };
   } catch (e) {
     return { ok: false, erro: e.message };
   }

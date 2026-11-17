@@ -366,11 +366,15 @@ async function rodarCenario(cv, cenario) {
   for (const [q, a] of Object.entries(cenario.esperado || {})) if (a) esperado[q] = a;
 
   const divergencias = [];
-  for (const [q, a] of Object.entries(esperado)) {
-    if (lidos[q] !== a) divergencias.push(`Q${q}: esperado ${a}, lido ${lidos[q] || '—'} (${r.leituras?.find((l) => l.numero === Number(q))?.estado})`);
-  }
-  for (const q of Object.keys(lidos)) {
-    if (!esperado[q]) divergencias.push(`Q${q}: leitura automática inesperada (${lidos[q]}) — deveria ir para conferência`);
+  // Cartão bloqueado: nada deve ser lido, então comparar com o gabarito sintético
+  // só produziria divergência falsa. O veredito aqui é o motivo do bloqueio.
+  if (!r.bloqueado) {
+    for (const [q, a] of Object.entries(esperado)) {
+      if (lidos[q] !== a) divergencias.push(`Q${q}: esperado ${a}, lido ${lidos[q] || '—'} (${r.leituras?.find((l) => l.numero === Number(q))?.estado})`);
+    }
+    for (const q of Object.keys(lidos)) {
+      if (!esperado[q]) divergencias.push(`Q${q}: leitura automática inesperada (${lidos[q]}) — deveria ir para conferência`);
+    }
   }
 
   return {
