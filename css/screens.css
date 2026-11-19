@@ -298,13 +298,13 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 .cf-btn[disabled] { opacity: .4; cursor: not-allowed; }
 
 .cf-instr {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  margin: 4px 14px 0; padding: 10px 14px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  margin: 2px 12px 0; padding: 8px 12px; text-align: center;
   background: rgba(20,24,29,.78); border-radius: var(--r);
 }
-.cf-instr strong { font-size: 17px; letter-spacing: .02em; color: var(--y-400); }
+.cf-instr strong { font-size: 16px; letter-spacing: .02em; color: var(--y-400); }
 .cf-passo { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--y-500); color: var(--y-ink); }
-.cf-sub { font-size: 12.5px; opacity: .9; }
+.cf-sub { font-size: 12px; line-height: 1.3; opacity: .9; }
 
 /* Tamanho e posição reais são calculados em js/screens/leitura.js (ajustarAlvo), para a
    moldura caber exatamente na área em que a câmera aparece. Aqui ficam só valores de reserva. */
@@ -328,7 +328,7 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 .cf-alvo.cartao .br { bottom: 1.47%; right: 2.15%; }
 
 .cf-status, .cf-aviso, .cf-escolha, .cf-manual {
-  margin: 8px 14px 0; padding: 10px 14px; border-radius: var(--r); font-size: 13.5px; text-align: center;
+  margin: 6px 12px 0; padding: 8px 12px; border-radius: var(--r); font-size: 13px; text-align: center;
 }
 .cf-status { align-self: center; background: rgba(20,24,29,.78); }
 .cf-status.ok { background: rgba(21,127,69,.92); font-weight: 650; }
@@ -364,7 +364,7 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 
 /* Zoom da câmera (1x, 2x, 3x) */
 .cf-zoom {
-  align-self: center; display: flex; gap: 4px; margin: 10px 14px 0;
+  align-self: center; display: flex; gap: 4px; margin: 6px 12px 0;
   padding: 4px; border-radius: 999px; background: rgba(20,24,29,.72);
 }
 .cf-zoom-btn {

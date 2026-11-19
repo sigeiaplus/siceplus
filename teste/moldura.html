@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bancada · moldura da câmera</title>
+  <link rel="stylesheet" href="../css/app.css" />
+  <link rel="stylesheet" href="../css/screens.css" />
+  <style>html, body { margin: 0; background: #000; } #out { position: fixed; left: 0; top: 0; z-index: 9999; margin: 0; font: 12px/1.35 monospace; color: #0f0; background: rgba(0,0,0,.75); padding: 6px; white-space: pre; }</style>
+</head>
+<body>
+  <pre id="out">medindo…</pre>
+
+  <div class="cam-full" data-cf>
+    <video playsinline muted autoplay></video>
+    <div class="cf-top">
+      <button class="cf-btn" type="button" aria-label="Voltar">‹</button>
+      <div class="cf-quem"><strong>ALICE DE OLIVEIRA SA…</strong><span>8 ANO EF AF REG 1</span></div>
+      <button class="cf-btn" type="button" aria-label="Lanterna">☀</button>
+      <button class="cf-btn" type="button" aria-label="Fechar">✕</button>
+    </div>
+    <div class="cf-instr">
+      <span class="cf-passo">2 de 2</span>
+      <strong>LEIA O CARTÃO RESPOSTA</strong>
+      <span class="cf-sub">Folha reta e os 4 quadrados pretos dentro das marcas da moldura.</span>
+    </div>
+    <div class="cf-alvo cartao" data-cf-alvo>
+      <span class="c tl"></span><span class="c tr"></span><span class="c bl"></span><span class="c br"></span>
+    </div>
+    <div class="cf-status">Procurando os 4 quadrados pretos…</div>
+    <div class="cf-zoom" data-cf-zoom>
+      <button class="cf-zoom-btn on" type="button">1x</button>
+      <button class="cf-zoom-btn" type="button">2x</button>
+      <button class="cf-zoom-btn" type="button">3x</button>
+    </div>
+    <div class="cf-baixo">
+      <button class="cf-sec" type="button">Enviar foto</button>
+      <button class="cf-obturador" type="button"><span></span></button>
+      <button class="cf-sec" type="button">Lançar manualmente</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { calcularMoldura, PROPORCAO_CARTAO } from '../js/leitor/moldura.js';
+
+    const out = document.getElementById('out');
+    const video = document.querySelector('video');
+    const alvo = document.querySelector('[data-cf-alvo]');
+    const barra = document.querySelector('.cf-baixo');
+
+    // Vídeo sintético 3:4 em pé, como a prévia real do aparelho (1080x1440).
+    const c = document.createElement('canvas');
+    c.width = 1080; c.height = 1440;
+    const g = c.getContext('2d');
+    g.fillStyle = '#b9ab9a'; g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = '#7a6f63'; g.fillRect(0, 300, c.width, 40);
+    video.srcObject = c.captureStream(5);
+
+    const pintado = () => {
+      const r = video.getBoundingClientRect();
+      const k = Math.min(r.width / video.videoWidth, r.height / video.videoHeight);
+      const dw = video.videoWidth * k, dh = video.videoHeight * k;
+      return {
+        x0: r.left + (r.width - dw) / 2, x1: r.left + (r.width + dw) / 2,
+        y0: r.top + (r.height - dh) / 2, y1: r.top + (r.height + dh) / 2,
+      };
+    };
+
+    function medir(passo = 'cartao', comStatus = true) {
+      document.querySelector('.cf-status').hidden = !comStatus;
+      const area = video.getBoundingClientRect();
+      const topoPilha = ['.cf-instr', '[data-cf-status]', '[data-cf-zoom]', '[data-cf-aviso]', '[data-cf-caderno]', '[data-cf-escolha]']
+        .map((s) => document.querySelector(s))
+        .filter((e) => e && !e.hidden && e.getClientRects().length)
+        .reduce((m, e) => Math.max(m, e.getBoundingClientRect().bottom), 0);
+      const m = calcularMoldura({
+        area,
+        video: { w: video.videoWidth, h: video.videoHeight },
+        barra: barra.getBoundingClientRect(),
+        barraLateral: getComputedStyle(barra).position === 'absolute',
+        topoPilha,
+        passo,
+      });
+      alvo.style.width = m.width + 'px';
+      alvo.style.height = m.height + 'px';
+      alvo.style.left = m.left + 'px';
+      alvo.style.top = m.top + 'px';
+      alvo.className = 'cf-alvo ' + (passo === 'qr' ? 'qr' : 'cartao');
+      const r = alvo.getBoundingClientRect();
+      const p = pintado();
+      return {
+        passo, comStatus,
+        tela: { w: innerWidth, h: innerHeight },
+        video: { w: video.videoWidth, h: video.videoHeight },
+        pintado: { x0: +p.x0.toFixed(1), x1: +p.x1.toFixed(1), y0: +p.y0.toFixed(1), y1: +p.y1.toFixed(1) },
+        topoPilha: +topoPilha.toFixed(1),
+        moldura: { left: +r.left.toFixed(1), top: +r.top.toFixed(1), right: +r.right.toFixed(1), bottom: +r.bottom.toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1) },
+        proporcao: +(r.height / r.width).toFixed(3),
+        ok: {
+          dentroDoVideo: r.left >= p.x0 - 1 && r.right <= p.x1 + 1 && r.top >= p.y0 - 1 && r.bottom <= p.y1 + 1,
+          abaixoDoTopo: r.top >= topoPilha - 1,
+          acimaDaBarra: r.bottom <= barra.getBoundingClientRect().top + 1,
+          proporcao: passo === 'qr' ? Math.abs(r.width - r.height) < 2 : Math.abs(r.height / r.width - 1 / PROPORCAO_CARTAO) < 0.02,
+        },
+      };
+    }
+
+    const iniciar = async () => {
+      try { await video.play(); } catch (_) {}
+      for (let i = 0; i < 60 && !video.videoWidth; i++) await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => requestAnimationFrame(r));
+      const r = {
+        cartao: medir('cartao', true),
+        cartaoSemStatus: medir('cartao', false),
+        qr: medir('qr', true),
+      };
+      document.querySelector('.cf-status').hidden = false;
+      medir('cartao', true);
+      window.__moldura = r;
+      out.textContent = JSON.stringify(r, null, 1);
+    };
+    iniciar();
+  </script>
+</body>
+</html>

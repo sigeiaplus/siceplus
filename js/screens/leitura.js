@@ -8,6 +8,7 @@ import { abrirCameraPrincipal, CameraErro, prepararCaptura, fotoEmAlta, aplicarZ
 import { codigoDe, igual, decidirQR, validarAssociacao as validarAssoc } from '../leitor/associacao.js';
 import { codigoDoQR } from '../leitor/qr-caderno.js';
 import { detectarMarcadores, lerQR, desenharRevisao } from '../leitor/leitor.js';
+import { calcularMoldura } from '../leitor/moldura.js';
 import { processarCartao, carregarParametros, salvarParametros, restaurarParametros, descreverCartao } from '../leitor/omr.js';
 
 let stream = null;
@@ -235,50 +236,42 @@ export default function leitura(params) {
   /* ---- moldura da câmera: sempre dentro da parte da tela em que a imagem aparece ---- */
 
   /**
-   * A prévia usa object-fit: contain. Quando a câmera entrega um quadro mais largo que a tela
-   * (comum no celular em pé: 4:3 deitado), sobra faixa preta em cima e embaixo. A moldura fixa
-   * (86vw × 58dvh) ficava maior que a imagem: não havia como encaixar os 4 cantos do cartão.
-   * Aqui a moldura é medida a partir da área em que a câmera realmente aparece.
+   * A moldura é medida a cada mudança de layout (ver js/leitor/moldura.js): área pintada
+   * do vídeo, espaço livre abaixo do que está no topo e acima da barra de botões.
    */
   function ajustarAlvo() {
     const alvo = $cf('[data-cf-alvo]');
-    const r = video.getBoundingClientRect();
-    if (!r.width || !r.height) return;
+    if (!alvo) return;
+    const area = video.getBoundingClientRect();
+    if (!area.width || !area.height) return;
 
-    // área visível do vídeo (desconta as faixas pretas)
-    let x0 = r.left, x1 = r.right, y0 = r.top, y1 = r.bottom;
-    const vw = video.videoWidth, vh = video.videoHeight;
-    if (vw && vh) {
-      const k = Math.min(r.width / vw, r.height / vh);
-      const dw = vw * k, dh = vh * k;
-      x0 += (r.width - dw) / 2; x1 = x0 + dw;
-      y0 += (r.height - dh) / 2; y1 = y0 + dh;
-    }
-
-    // A barra de baixo ocupa a base em pé e a lateral direita deitado.
-    const barra = $cf('.cf-baixo').getBoundingClientRect();
-    if (getComputedStyle($cf('.cf-baixo')).position === 'absolute') x1 = Math.min(x1, barra.left - 8);
-
-    // Espaço livre entre os avisos/instrução e os controles de baixo: a moldura não fica
-    // embaixo do texto nem do zoom.
+    const barraEl = $cf('.cf-baixo');
+    // Só entra o que está realmente visível: um card escondido não pode encolher a moldura.
     const topoPilha = ['.cf-instr', '[data-cf-status]', '[data-cf-zoom]', '[data-cf-aviso]', '[data-cf-caderno]', '[data-cf-escolha]']
       .map((s) => $cf(s))
-      .filter((e) => e && !e.hidden)
+      .filter((e) => e && !e.hidden && e.getClientRects().length)
       .reduce((m, e) => Math.max(m, e.getBoundingClientRect().bottom), 0);
-    const topo = Math.max(y0, topoPilha + 8);
-    const base = Math.min(y1, barra.top - 8);
-    const livre = base - topo;
-    const usaFolga = livre >= 140;
-    const centroY = usaFolga ? (topo + base) / 2 : (y0 + y1) / 2;
-    const alturaUtil = usaFolga ? livre : y1 - y0;
 
-    const prop = ov.passo === 'qr' ? 1 : 186 / 273;
-    const w = Math.min((x1 - x0) * 0.92, alturaUtil * 0.92 * prop);
-    if (!(w > 0)) return;
-    alvo.style.width = Math.round(w) + 'px';
-    alvo.style.height = Math.round(w / prop) + 'px';
-    alvo.style.left = Math.round((x0 + x1) / 2) + 'px';
-    alvo.style.top = Math.round(centroY) + 'px';
+    const m = calcularMoldura({
+      area,
+      video: { w: video.videoWidth, h: video.videoHeight },
+      barra: barraEl.getBoundingClientRect(),
+      barraLateral: getComputedStyle(barraEl).position === 'absolute',
+      topoPilha,
+      passo: ov.passo,
+    });
+    if (!m) return;
+    alvo.style.width = m.width + 'px';
+    alvo.style.height = m.height + 'px';
+    alvo.style.left = m.left + 'px';
+    alvo.style.top = m.top + 'px';
+  }
+
+  // O DOM muda antes da medição (um card aparece/some e o layout só vale no quadro seguinte).
+  let alvoRaf = 0;
+  function ajustarAlvoDepois() {
+    if (alvoRaf) cancelAnimationFrame(alvoRaf);
+    alvoRaf = requestAnimationFrame(() => { alvoRaf = 0; ajustarAlvo(); });
   }
 
   /* ---- estado visual do overlay ---- */
@@ -306,9 +299,9 @@ export default function leitura(params) {
       ? 'Confira o nome do caderno acima. Se não for este, toque em “Ler outro”.'
       : (qr
         ? 'Aponte para o QR Code do cartão, de frente e com boa luz.'
-        : 'Mantenha a folha reta e os 4 quadrados pretos dos cantos dentro da moldura.');
+        : 'Folha reta e os 4 quadrados pretos dentro das marcas da moldura.');
     $cf('[data-cf-alvo]').className = 'cf-alvo ' + (qr ? 'qr' : 'cartao') + (!qr && ov.marc >= 2 ? ' ok' : '');
-    ajustarAlvo();
+    ajustarAlvoDepois();
     // Passo do QR: o caderno só é identificado pela leitura do QR Code (sem digitar código).
     const bm = $cf('[data-cf-manual]');
     bm.textContent = 'Lançar manualmente';
@@ -681,6 +674,11 @@ export default function leitura(params) {
     cf.hidden = false;
     document.body.classList.add('cam-open');
     entrarTelaCheia();   // ainda no gesto do toque; não há await antes
+    // Barra de endereço, tela cheia e rotação mudam a área disponível: remede a moldura.
+    window.addEventListener('resize', ajustarAlvo);
+    window.addEventListener('orientationchange', ajustarAlvo);
+    document.addEventListener('fullscreenchange', ajustarAlvo);
+    document.addEventListener('webkitfullscreenchange', ajustarAlvo);
     atualizarOverlay();
     if (!alvoObs && typeof ResizeObserver !== 'undefined') {
       alvoObs = new ResizeObserver(() => ajustarAlvo());
@@ -699,6 +697,11 @@ export default function leitura(params) {
     ov.escolhaCartao = null;
     clearTimeout(ov.timer);
     ov.timer = null;
+    if (alvoRaf) { cancelAnimationFrame(alvoRaf); alvoRaf = 0; }
+    window.removeEventListener('resize', ajustarAlvo);
+    window.removeEventListener('orientationchange', ajustarAlvo);
+    document.removeEventListener('fullscreenchange', ajustarAlvo);
+    document.removeEventListener('webkitfullscreenchange', ajustarAlvo);
     pararCamera();
     video.srcObject = null;
     $cf('[data-cf-torch]').hidden = true;
