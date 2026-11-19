@@ -117,7 +117,7 @@ export async function processarCartao(cv, imagem, o = {}) {
   if (m.cortado) return falha('cartao_cortado');
 
   const al = alinharCartao(cv, imagem, m.cantos);
-  etapas.perspectiva = { ok: !!al.ok };
+  etapas.perspectiva = { ok: !!al.ok, refinado: !!al.refinado, marcadores: al.marcadoresMedidos ?? 0 };
   if (!al.ok) return falha('alinhamento');
 
   try {

@@ -314,7 +314,7 @@ function centroLocal(cv, cinza, cx, cy, janelaMm) {
     const lado = Math.sqrt(melhor.a) / S;                       // mm
     const cheio = melhor.a / Math.max(melhor.rr.size.width * melhor.rr.size.height, 1e-6);
     const razao = melhor.rr.size.width / Math.max(melhor.rr.size.height, 1e-6);
-    if (lado < LADO_MIN_MM || lado > LADO_MAX_MM || cheio < 0.86 || razao < 0.8 || razao > 1.25) return null;
+    if (lado < LADO_MIN_MM || lado > LADO_MAX_MM || cheio < 0.8 || razao < 0.7 || razao > 1.45) return null;
     return { x: (x0 + melhor.m.m10 / melhor.m.m00) / S, y: (y0 + melhor.m.m01 / melhor.m.m00) / S };
   } finally {
     roi.delete(); bin.delete(); contornos.delete(); hier.delete();
@@ -339,8 +339,8 @@ export function alinharCartao(cv, imagem, cantos) {
     const cinzaOrig = novo();
     cv.cvtColor(rgba, cinzaOrig, cv.COLOR_RGBA2GRAY);
 
-    const homografia = (pts) => {
-      const a = ptsMat(cv, pts), b = ptsMat(cv, dst);
+    const homografia = (pts, destino = dst) => {
+      const a = ptsMat(cv, pts), b = ptsMat(cv, destino);
       const M = cv.getPerspectiveTransform(a, b);
       const arr = Array.from(M.data64F);
       a.delete(); b.delete(); M.delete();
@@ -363,6 +363,10 @@ export function alinharCartao(cv, imagem, cantos) {
       pequena = novo();
       cv.resize(cinzaOrig, pequena, new cv.Size(Math.round(cinzaOrig.cols * reducao), Math.round(cinzaOrig.rows * reducao)), 0, 0, cv.INTER_AREA);
     }
+    // No quadro reduzido tudo tem de estar na mesma escala: cantos da foto × reducao e
+    // destino (mm × PX_POR_MM) × reducao. Misturar as duas escalas dava homografia sem
+    // sentido, a rotação era escolhida no chute e o cartão bom voltava como "não bateu".
+    const dstPequeno = dst.map((p) => ({ x: p.x * reducao, y: p.y * reducao }));
     const dsizePequeno = new cv.Size(Math.max(8, Math.round(largPx * reducao)), Math.max(8, Math.round(altPx * reducao)));
     const aplicarPequeno = (origem, arr) => {
       const Mm = cv.matFromArray(3, 3, cv.CV_64F, arr);
@@ -375,7 +379,7 @@ export function alinharCartao(cv, imagem, cantos) {
     let melhor = null;
     for (const k of [0, 1, 2, 3]) {
       const pts = [0, 1, 2, 3].map((i) => cantos[(k + i) % 4]);
-      const arr = homografia(pts);
+      const arr = homografia(pts.map((p) => ({ x: p.x * reducao, y: p.y * reducao })), dstPequeno);
       const w = aplicarPequeno(pequena, arr);
       // O QR (canto superior direito) é a região mais densa da folha. Se, depois de
       // endireitar, a densidade estiver no canto oposto, a folha está de cabeça para baixo.
@@ -391,33 +395,47 @@ export function alinharCartao(cv, imagem, cantos) {
       }
     }
     melhor.w.delete();
+    // A rotação escolhida, agora em tamanho cheio (a homografia pequena só serviu para medir).
+    const M0 = homografia(melhor.pts, dst);
 
     // Refino: mede os marcadores na folha endireitada e corrige a homografia.
-    // Um canto pode não ser medido (reflexo, dobra, sombra); com 3 dos 4 medidos a
-    // correção continua confiável e o quarto fica na posição prevista.
+    // O refino é MELHORIA de precisão, não validação: os 4 quadrados já foram achados e
+    // conferidos na foto (forma, proporção e a folha em volta), então uma medição que
+    // falha aqui (reflexo, sombra, dobra, desfoque) NÃO pode mais recusar o cartão —
+    // antes isso virava "os quadrados dos cantos não bateram" com a foto boa.
     const esperados = centrosMarcadores();
-    const cinza0 = aplicar(cinzaOrig, melhor.arr);
-    let medidos, M;
+    const cinza0 = aplicar(cinzaOrig, M0);
+    let medidos = [], achados = 0;
     try {
-      medidos = esperados.map((p) => centroLocal(cv, cinza0, p.x, p.y, 8));
+      // Janela progressiva: só abre mais quando o quadrado não aparece na janela estreita.
+      for (const janela of [8, 14]) {
+        medidos = esperados.map((p) => centroLocal(cv, cinza0, p.x, p.y, janela));
+        achados = medidos.filter(Boolean).length;
+        if (achados >= 3) break;
+      }
+      // Descarta medição claramente errada (pegou outro objeto) quando as outras três bastam.
+      const desvio = medidos.map((m, i) => (m ? Math.hypot(m.x - esperados[i].x, m.y - esperados[i].y) : 0));
+      const bons = medidos.filter((m, i) => m && desvio[i] <= 10).length;
+      if (bons >= 3) medidos = medidos.map((m, i) => (m && desvio[i] <= 10 ? m : null));
+      else medidos = medidos.map(() => null);
+      achados = medidos.filter(Boolean).length;
     } finally {
       cinza0.delete();
     }
-    const achados = medidos.filter(Boolean).length;
-    const desvio = medidos.map((m, i) => (m ? Math.hypot(m.x - esperados[i].x, m.y - esperados[i].y) : 0));
-    // Menos de 3 quadrados no lugar (ou algum muito fora) = não era o cartão / veio torto demais.
-    if (achados < 3 || desvio.some((d) => d > 8)) return { ok: false };
-    M = melhor.arr;
-    const pontosMedidos = medidos.map((m, i) => (m ? { x: m.x * S, y: m.y * S } : { x: esperados[i].x * S, y: esperados[i].y * S }));
-    const a = ptsMat(cv, pontosMedidos);
-    const b = ptsMat(cv, dst);
-    const M2m = cv.getPerspectiveTransform(a, b);
-    M = mult3(Array.from(M2m.data64F), M);
-    a.delete(); b.delete(); M2m.delete();
+
+    let M = M0;
+    if (achados >= 3) {
+      const pontosMedidos = medidos.map((m, i) => (m ? { x: m.x * S, y: m.y * S } : { x: esperados[i].x * S, y: esperados[i].y * S }));
+      const a = ptsMat(cv, pontosMedidos);
+      const b = ptsMat(cv, dst);
+      const M2m = cv.getPerspectiveTransform(a, b);
+      M = mult3(Array.from(M2m.data64F), M0);
+      a.delete(); b.delete(); M2m.delete();
+    }
 
     const cinza = aplicar(cinzaOrig, M);
     const rgbaAlinhada = aplicar(rgba, M);
-    return { ok: true, cinza, rgba: rgbaAlinhada, M };
+    return { ok: true, cinza, rgba: rgbaAlinhada, M, refinado: achados >= 3, marcadoresMedidos: achados };
   } finally {
     limpar();
   }

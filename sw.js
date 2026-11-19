@@ -1,7 +1,7 @@
 /* SICEP+ · Service Worker (app shell) */
 
 // Suba o número a cada entrega que mude arquivos do app (força o aparelho a baixar tudo de novo).
-const CACHE = 'sicep-v12';
+const CACHE = 'sicep-v13';
 
 // O OpenCV (~13 MB) fica em cache próprio e com versão própria: subir o CACHE acima
 // NÃO apaga o OpenCV, então ninguém baixa 13 MB de novo a cada atualização do app.
@@ -86,6 +86,28 @@ self.addEventListener('fetch', (ev) => {
           })
         )
       )
+    );
+    return;
+  }
+
+  // Código do app (JS/CSS/HTML): rede primeiro, cache só quando está sem internet.
+  // Antes era cache-primeiro: a correção chegava no servidor e o aparelho continuava
+  // rodando o arquivo velho até alguém subir o número do cache. Agora a leitura nova
+  // entra na primeira abertura com internet.
+  const caminho = new URL(req.url).pathname;
+  const ehCodigo = req.destination === 'script' || req.destination === 'style' || req.destination === 'document'
+    || /\.(js|css|html)$/i.test(caminho);
+  if (ehCodigo) {
+    ev.respondWith(
+      fetch(req)
+        .then((resp) => {
+          if (resp && resp.ok) {
+            const copia = resp.clone();
+            caches.open(CACHE).then((c) => c.put(req, copia));
+          }
+          return resp;
+        })
+        .catch(() => caches.match(req))
     );
     return;
   }
