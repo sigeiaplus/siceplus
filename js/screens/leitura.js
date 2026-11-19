@@ -1489,6 +1489,11 @@ export default function leitura(params) {
           : `${legendaHTML()}
              <p class="xs muted" style="margin:10px 0">Amarelo = precisa da sua decisão. Toque na questão para escolher a alternativa ou deixar em branco.</p>`}
         ${!manual && st.cartaoQR ? `<p class="xs muted" style="margin:0 0 8px">Cartão lido: ${esc(descreverCartao(st.cartaoQR))}</p>` : ''}
+        ${!manual && st.processo?.layout?.versao === 3 ? `<div class="alert y" style="margin:0 0 10px">
+          ${icon('info', 16)}
+          <span>Este cartão foi impresso no <span class="strong">layout anterior (v3)</span>. A leitura usou a grade antiga, que confere com a folha.
+          Imprima os próximos cartões na aba Cartões (layout v4).</span>
+        </div>` : ''}
         <div class="ans-grid" id="grade">${st.leituras.map(tileHTML).join('')}</div>
         <div id="editor-box"></div>
         <div class="row wrap" style="gap:8px;margin-top:10px">

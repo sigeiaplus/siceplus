@@ -470,7 +470,19 @@ async function cenarios() {
       esperado: {},
     }),
     base(12, 5, {
-      nome: 'cartão de outra versão (impresso com 3 colunas)',
+      nome: 'válido · cartão enchendo o quadro (nova moldura)',
+      foto: { largura: 1600, altura: 2130, quad: enquadrar(1600, 2130, 0.965), ruido: 5 },
+    }),
+    base(12, 5, {
+      nome: 'válido · sombra forte (luz de canto)',
+      foto: { largura: 1600, altura: 2130, quad: enquadrar(1600, 2130, 0.84), luz: 1.1, ruido: 10 },
+    }),
+    base(12, 5, {
+      nome: 'válido · foto pequena 900×1200 com sombra',
+      foto: { largura: 900, altura: 1200, quad: enquadrar(900, 1200, 0.84), luz: 1.1, ruido: 10 },
+    }),
+    base(12, 5, {
+      nome: 'cartão v3 (impresso com 3 colunas) — lido com a geometria antiga',
       cartaoLegado: 3,
       marcas: (() => { const m = []; for (let q = 1; q <= 12; q++) m.push({ numero: q, alt: LETRAS[(q * 2) % 5] }); return m; })(),
       esperado: (() => { const e = {}; for (let q = 1; q <= 12; q++) e[q] = LETRAS[(q * 2) % 5]; return e; })(),

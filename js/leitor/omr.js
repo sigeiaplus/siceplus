@@ -23,6 +23,7 @@ import {
 } from './leitor.js';
 import { interpretarPayload, resumoQR } from './qr-caderno.js';
 import { GEOMETRIA_VERSAO, layoutCartao } from './geometria.js';
+import { VERSAO_V3, layoutCartaoV3 } from './geometria-v3.js';
 
 const CHAVE_PARAMS = 'sicep.omr.params';
 
@@ -137,8 +138,10 @@ export async function processarCartao(cv, imagem, o = {}) {
     if (!texto) aviso.push('qr_nao_lido');
 
     // 2) O QR diz de que cartão é: conferir versão do layout e tamanho da grade.
+    //    v3 é aceito porque cartões impressos antes da v4 continuam válidos: eles são
+    //    lidos com a geometria v3 (conferida na folha), nunca com a v4.
     if (cartao && !cartao.legado) {
-      if (cartao.geometria && cartao.geometria !== GEOMETRIA_VERSAO) {
+      if (cartao.geometria && cartao.geometria !== GEOMETRIA_VERSAO && cartao.geometria !== VERSAO_V3) {
         return falha('versao_diferente', { geometria: cartao.geometria });
       }
       if (cartao.questoes && cartao.questoes !== nQuestoes) {
@@ -156,7 +159,24 @@ export async function processarCartao(cv, imagem, o = {}) {
     }
 
     // 4) A grade impressa corresponde ao layout calculado?
-    const g = verificarGrade(cv, al.cinza, layout, P.minGrade);
+    //    Cartões v3 (QR antigo sem versão, ou QR dizendo v3) são lidos com a geometria v3,
+    //    mas só quando ela confere MUITO bem com a folha impressa — nada de tentativa cega.
+    const qrDizV3 = !!cartao && !cartao.legado && cartao.geometria === VERSAO_V3;
+    const aceitaV3 = (!cartao || cartao.legado || qrDizV3);
+    let g = qrDizV3 ? { ok: false, razao: 0 } : verificarGrade(cv, al.cinza, layout, P.minGrade);
+    if (!g.ok && aceitaV3) {
+      let l3 = null;
+      try { l3 = layoutCartaoV3(o.questoes || [], nAlts, LETRAS_CARTAO.slice(0, nAlts)); } catch (_) { l3 = null; }
+      if (l3 && (l3.colunas !== layout.colunas || l3.linhas !== layout.linhas)) {
+        const g3 = verificarGrade(cv, al.cinza, l3, Math.max(0.9, P.minGrade));
+        if (g3.ok) {
+          layout = l3;
+          g = g3;
+          aviso.push('layout_anterior');   // tela avisa: cartão impresso no layout anterior
+        }
+      }
+    }
+    etapas.versao = layout.versao;
     etapas.grade = g;
     if (!g.ok) {
       aviso.push('grade_nao_confere');
