@@ -606,11 +606,14 @@ export default function leitura(params) {
       if (t && ov.aberto) tratarQR(t);
       return;
     }
-    const q = quadroDoVideo(560);
+    const q = quadroDoVideo(520);
     if (!q) return;
-    const r = detectarMarcadores(ov.cv, q, { maxLado: 560 });
-    ov.marc = r.ok ? Math.min(3, ov.marc + 1) : 0;
-    ov.ocupacao = r.ok ? r.ocupacao : null;
+    const r = detectarMarcadores(ov.cv, q, { maxLado: 520 });
+    // Verde no primeiro quadro bom e só apaga depois de 3 quadros ruins seguidos.
+    // Antes eram 2 acertos SEGUIDOS e qualquer falha zerava: com um quadro tremido no
+    // meio parecia que o enquadramento nunca ficava verde.
+    ov.marc = r.ok ? 3 : Math.max(0, ov.marc - 1);
+    if (r.ok) ov.ocupacao = r.ocupacao;
     atualizarOverlay();   // só redesenha quando algo muda (ver assinatura em atualizarOverlay)
   }
 
@@ -622,7 +625,7 @@ export default function leitura(params) {
       ov.ocupado = true;
       try { await analisarQuadro(); } catch (e) { console.warn('[SICEP+] leitura ao vivo:', e); } finally { ov.ocupado = false; }
     }
-    if (ov.aberto) ov.timer = setTimeout(ciclo, ov.passo === 'qr' ? 550 : 280);
+    if (ov.aberto) ov.timer = setTimeout(ciclo, ov.passo === 'qr' ? 500 : 170);
   }
 
   /* ---- abrir / fechar ---- */

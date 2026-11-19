@@ -61,7 +61,10 @@ export const PARAMS_PADRAO = {
   dominancia: 0.6,
   incerteza: 0.35,
   raioAmostra: 0.62,
-  percentilPapel: 0.75,
+  // Percentil, por questão, da bolinha mais clara (a que comprovadamente não foi marcada).
+  // 0,5 = mediana dessas claras; assim a referência de papel não depende de quantas
+  // questões o aluno respondeu.
+  percentilPapel: 0.5,
   minGrade: 0.8,
   maxLado: 1600,
   conferirBranco: false,
@@ -76,7 +79,7 @@ export const LIMIAR = {
 
 const FAIXAS = {
   marcada: [0.05, 0.95], fraca: [0.01, 0.9], dominancia: [0.1, 1], incerteza: [0.05, 1],
-  raioAmostra: [0.3, 0.9], percentilPapel: [0.5, 0.95], minGrade: [0.3, 1], maxLado: [600, 4000],
+  raioAmostra: [0.3, 0.9], percentilPapel: [0.3, 0.95], minGrade: [0.3, 1], maxLado: [600, 4000],
 };
 
 /** Junta os parâmetros recebidos com os padrões, ignorando valores inválidos. */
@@ -187,10 +190,13 @@ export function detectarMarcadores(cv, imagem, { maxLado = 1600 } = {}) {
       const razao = lw / Math.max(lh, 1e-6);
       const cheio = a / Math.max(lw * lh, 1e-6);
       if (razao < 0.6 || razao > 1.67 || cheio < 0.76) { c.delete(); continue; }
+      const bb = cv.boundingRect(c);
+      // Marcador encostando na borda da foto = a folha foi cortada ali (o contorno também foi cortado).
+      const borda = bb.x <= 1 || bb.y <= 1 || bb.x + bb.width >= W - 1 || bb.y + bb.height >= H - 1;
       const m = cv.moments(c);
       c.delete();
       if (!m.m00) continue;
-      candidatos.push({ x: m.m10 / m.m00, y: m.m01 / m.m00, lado: Math.sqrt(a) });
+      candidatos.push({ x: m.m10 / m.m00, y: m.m01 / m.m00, lado: Math.sqrt(a), borda });
     }
 
     if (candidatos.length < 4) return { ok: false, cantos: null, achados: candidatos.length };
@@ -222,10 +228,11 @@ export function detectarMarcadores(cv, imagem, { maxLado = 1600 } = {}) {
     const escolhidos = melhorQuad.grupo;
 
     // Distância do marcador mais próximo da borda da FOTO (fração do menor lado).
-    // Perto de zero = a foto cortou a folha (o marcador está na beirada).
+    // É só informativa: com o cartão ocupando o quadro (que é o que a moldura pede) essa
+    // distância é pequena SEM que a folha esteja cortada — por isso o corte de verdade é
+    // medido pelo contorno tocando a borda (`borda`), não por esta margem.
     const menorLado = Math.min(W, H);
     const margem = Math.min(...escolhidos.map((p) => Math.min(p.x, p.y, W - p.x, H - p.y))) / menorLado;
-    const ladoRel = (escolhidos.reduce((t, c) => t + c.lado, 0) / 4) / menorLado;
 
     return {
       ok: true,
@@ -233,8 +240,8 @@ export function detectarMarcadores(cv, imagem, { maxLado = 1600 } = {}) {
       achados: candidatos.length,
       ocupacao: melhorQuad.ar / area, // fração do quadro ocupada pelo cartão (0–1)
       margem: Number(margem.toFixed(4)),
-      // Quadrado encostando na borda da foto = a folha foi cortada no enquadramento.
-      cortado: margem < ladoRel * 0.6,
+      // Só é corte quando o próprio quadrado preto foi seccionado pela borda da foto.
+      cortado: escolhidos.some((p) => p.borda),
     };
   } finally {
     limpar();
@@ -261,8 +268,7 @@ function destinoPx() {
  * Densidade de tinta (0–1) numa região da folha endireitada, em mm.
  * Usa limiar adaptativo, então sombra e luz irregular não contam como tinta.
  */
-function densidadeTinta(cv, cinza, x0, y0, x1, y1) {
-  const S = PX_POR_MM;
+function densidadeTinta(cv, cinza, x0, y0, x1, y1, S = PX_POR_MM) {
   const rect = new cv.Rect(Math.round(x0 * S), Math.round(y0 * S), Math.round((x1 - x0) * S), Math.round((y1 - y0) * S));
   const roi = cinza.roi(rect);
   const bin = new cv.Mat();
@@ -349,17 +355,33 @@ export function alinharCartao(cv, imagem, cantos) {
     };
 
     // Testa as 4 rotações possíveis: a certa deixa o QR (densidade alta) no canto superior direito.
-    const candidatosK = [0, 1, 2, 3];
+    // Os testes rodam num quadro reduzido (4 warps pequenos custam menos que um grande) e só
+    // a rotação escolhida é endireitada em tamanho cheio.
+    const reducao = Math.min(1, 520 / Math.max(cinzaOrig.cols, cinzaOrig.rows));
+    let pequena = cinzaOrig;
+    if (reducao < 1) {
+      pequena = novo();
+      cv.resize(cinzaOrig, pequena, new cv.Size(Math.round(cinzaOrig.cols * reducao), Math.round(cinzaOrig.rows * reducao)), 0, 0, cv.INTER_AREA);
+    }
+    const dsizePequeno = new cv.Size(Math.max(8, Math.round(largPx * reducao)), Math.max(8, Math.round(altPx * reducao)));
+    const aplicarPequeno = (origem, arr) => {
+      const Mm = cv.matFromArray(3, 3, cv.CV_64F, arr);
+      const out = new cv.Mat();
+      cv.warpPerspective(origem, out, Mm, dsizePequeno, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(255));
+      Mm.delete();
+      return out;
+    };
 
     let melhor = null;
-    for (const k of candidatosK) {
+    for (const k of [0, 1, 2, 3]) {
       const pts = [0, 1, 2, 3].map((i) => cantos[(k + i) % 4]);
       const arr = homografia(pts);
-      const w = aplicar(cinzaOrig, arr);
+      const w = aplicarPequeno(pequena, arr);
       // O QR (canto superior direito) é a região mais densa da folha. Se, depois de
       // endireitar, a densidade estiver no canto oposto, a folha está de cabeça para baixo.
-      const dA = densidadeTinta(cv, w, AREA_QR.x0, AREA_QR.y0, AREA_QR.x1, AREA_QR.y1);
-      const dB = densidadeTinta(cv, w, AREA_OPOSTA.x0, AREA_OPOSTA.y0, AREA_OPOSTA.x1, AREA_OPOSTA.y1);
+      const S2 = S * reducao;
+      const dA = densidadeTinta(cv, w, AREA_QR.x0, AREA_QR.y0, AREA_QR.x1, AREA_QR.y1, S2);
+      const dB = densidadeTinta(cv, w, AREA_OPOSTA.x0, AREA_OPOSTA.y0, AREA_OPOSTA.x1, AREA_OPOSTA.y1, S2);
       const pontos = dA - dB;
       if (!melhor || pontos > melhor.pontos) {
         if (melhor) melhor.w.delete();
@@ -368,23 +390,30 @@ export function alinharCartao(cv, imagem, cantos) {
         w.delete();
       }
     }
+    melhor.w.delete();
 
-    // Refino: mede os 4 marcadores na folha endireitada e corrige a homografia.
-    let M = melhor.arr;
+    // Refino: mede os marcadores na folha endireitada e corrige a homografia.
+    // Um canto pode não ser medido (reflexo, dobra, sombra); com 3 dos 4 medidos a
+    // correção continua confiável e o quarto fica na posição prevista.
     const esperados = centrosMarcadores();
-    const medidos = esperados.map((p) => centroLocal(cv, melhor.w, p.x, p.y, 6));
-    const confere = medidos.every((m, i) => m && Math.hypot(m.x - esperados[i].x, m.y - esperados[i].y) < 4);
-    if (!confere) {
-      // Os 4 quadrados não caíram onde o cartão manda: não era a folha (ou veio torta demais).
-      melhor.w.delete();
-      return { ok: false };
+    const cinza0 = aplicar(cinzaOrig, melhor.arr);
+    let medidos, M;
+    try {
+      medidos = esperados.map((p) => centroLocal(cv, cinza0, p.x, p.y, 8));
+    } finally {
+      cinza0.delete();
     }
-    const a = ptsMat(cv, medidos.map((m) => ({ x: m.x * S, y: m.y * S })));
+    const achados = medidos.filter(Boolean).length;
+    const desvio = medidos.map((m, i) => (m ? Math.hypot(m.x - esperados[i].x, m.y - esperados[i].y) : 0));
+    // Menos de 3 quadrados no lugar (ou algum muito fora) = não era o cartão / veio torto demais.
+    if (achados < 3 || desvio.some((d) => d > 8)) return { ok: false };
+    M = melhor.arr;
+    const pontosMedidos = medidos.map((m, i) => (m ? { x: m.x * S, y: m.y * S } : { x: esperados[i].x * S, y: esperados[i].y * S }));
+    const a = ptsMat(cv, pontosMedidos);
     const b = ptsMat(cv, dst);
     const M2m = cv.getPerspectiveTransform(a, b);
     M = mult3(Array.from(M2m.data64F), M);
     a.delete(); b.delete(); M2m.delete();
-    melhor.w.delete();
 
     const cinza = aplicar(cinzaOrig, M);
     const rgbaAlinhada = aplicar(rgba, M);
@@ -403,7 +432,9 @@ function percentil(valores, p) {
 
 /** Remove sombras: divide a imagem pelo "fundo" (papel sem tinta). */
 function normalizarIluminacao(cv, cinza) {
-  const fundo = new cv.Mat(), norm = new cv.Mat();
+      const fundo = new cv.Mat(), norm = new cv.Mat();
+  // Kernel largo de propósito: sombra de canto é um degrade grande — com kernel curto
+  // sobra gradiente e a marca fraca de uma alternativa vizinha fica invisível.
   const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(51, 51));
   try {
     cv.dilate(cinza, fundo, k);
@@ -447,14 +478,23 @@ export function lerBolhas(cv, cinzaAlinhada, layout, params = {}) {
       return n ? soma / n : 255;
     });
 
-    // Referência: bolinha vazia (papel + letra impressa). O percentil resiste a muitas marcas.
-    const papel = percentil(medias, P.percentilPapel) || 255;
-
+    // Referência de "papel vazio": em cada questão a bolinha mais clara é, por definição,
+    // uma NÃO marcada (o aluno marca no máximo uma alternativa). A mediana dessas claras
+    // não se deixa levar pelo tanto de questões respondidas — antes, com um percentil
+    // global, um cartão todo respondido puxava a referência para a tinta e tudo virava
+    // "em branco", e um cartão com poucas marcas escondia a marca fraca da vizinha.
     const porQuestao = new Map();
     layout.bolhas.forEach((b, i) => {
-      const f = Math.max(0, Math.min(1, (papel - medias[i]) / papel));
       if (!porQuestao.has(b.numero)) porQuestao.set(b.numero, []);
-      porQuestao.get(b.numero).push({ alt: b.alt, f });
+      porQuestao.get(b.numero).push({ alt: b.alt, media: medias[i] });
+    });
+    const claras = [...porQuestao.values()].map((a) => Math.max(...a.map((x) => x.media)));
+    const papel = percentil(claras, P.percentilPapel) || 255;
+    // Cada questão é comparada com a SUA bolinha mais clara: sombra de um canto da folha
+    // não afeta a comparação da linha que está no canto oposto.
+    porQuestao.forEach((a) => {
+      const ref = Math.max(1, Math.max(...a.map((x) => x.media)));
+      a.forEach((x) => { x.f = Math.max(0, Math.min(1, (ref - x.media) / ref)); });
     });
 
     const leituras = layout.numeros.map((q) => {
@@ -507,10 +547,10 @@ export function verificarGrade(cv, cinzaAlinhada, layout, minimo = PARAMS_PADRAO
       let anel = 255;
       for (let d = -1; d <= 1; d++) anel = Math.min(anel, px(cx + (r + d) * ca, cy + (r + d) * sa));
       const fora = px(cx + (r + 0.55 * S) * ca, cy + (r + 0.55 * S) * sa);
-      if (fora > 0 && (fora - anel) / fora > 0.06) angulosBons++;
+      if (fora > 0 && (fora - anel) / fora > 0.05) angulosBons++;
     }
     total++;
-    if (angulosBons / N >= 0.5) boas++;   // o contorno aparece em pelo menos metade da volta
+    if (angulosBons / N >= 0.4) boas++;   // o contorno impresso aparece na volta (foto desfocada perde alguns ângulos)
   }
   const razao = total ? boas / total : 0;
   return { ok: razao >= minimo, razao: Number(razao.toFixed(3)) };

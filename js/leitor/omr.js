@@ -118,11 +118,7 @@ export async function processarCartao(cv, imagem, o = {}) {
 
   const al = alinharCartao(cv, imagem, m.cantos);
   etapas.perspectiva = { ok: !!al.ok };
-  if (!al.ok) {
-    // Quadrados achados na beirada da foto + retângulo que não fecha = folha cortada.
-    if (m.cortado || (m.margem != null && m.margem < 0.03)) return falha('cartao_cortado');
-    return falha('alinhamento');
-  }
+  if (!al.ok) return falha('alinhamento');
 
   try {
     // 1) QR: primeiro na folha endireitada; só depois na foto inteira.
@@ -179,18 +175,29 @@ export async function processarCartao(cv, imagem, o = {}) {
     etapas.versao = layout.versao;
     etapas.grade = g;
     if (!g.ok) {
-      aviso.push('grade_nao_confere');
-      // Antes de culpar a foto: o cartão pode ser de outra versão do layout.
-      const d = diagnosticarGrade(cv, al.cinza, {
-        questoes: o.questoes || [], numAlternativas: nAlts, minimo: P.minGrade,
-      });
-      etapas.diagnostico = d;
-      // Só afirma "outra versão" quando outra grade explica MUITO bem o que está impresso.
-      const outraGrade = d.grade && (d.grade.cols !== layout.colunas || d.grade.rows !== layout.linhas);
-      if (outraGrade && d.razao >= Math.max(0.85, P.minGrade)) {
-        return falha('cartao_outra_versao', { grade: d.grade, atual: layout });
+      // O QR já provou qual é o cartão (mesma versão, mesmas questões e alternativas) e a
+      // grade está pelo menos meio no lugar: o problema é a foto (desfoque, sombra, tremor),
+      // não o cartão. Segue com aviso — e nenhuma questão em branco é dada como certa
+      // (o bloco abaixo marca todas as em branco para conferência manual).
+      const identidadeConfirmada = !!cartao && !cartao.legado
+        && (!cartao.geometria || cartao.geometria === layout.versao)
+        && (!cartao.questoes || cartao.questoes === nQuestoes)
+        && (!cartao.alternativas || cartao.alternativas === nAlts);
+      if (!(identidadeConfirmada && g.razao >= 0.5)) {
+        aviso.push('grade_nao_confere');
+        // Antes de culpar a foto: o cartão pode ser de outra versão do layout.
+        const d = diagnosticarGrade(cv, al.cinza, {
+          questoes: o.questoes || [], numAlternativas: nAlts, minimo: P.minGrade,
+        });
+        etapas.diagnostico = d;
+        // Só afirma "outra versão" quando outra grade explica MUITO bem o que está impresso.
+        const outraGrade = d.grade && (d.grade.cols !== layout.colunas || d.grade.rows !== layout.linhas);
+        if (outraGrade && d.razao >= Math.max(0.85, P.minGrade)) {
+          return falha('cartao_outra_versao', { grade: d.grade, atual: layout });
+        }
+        return falha('grade', { razao: g.razao, impresso: layout });
       }
-      return falha('grade', { razao: g.razao, impresso: layout });
+      etapas.grade = { ...g, parcial: true };
     }
 
     // 5) bolinhas
