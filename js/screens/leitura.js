@@ -7,7 +7,7 @@ import { carregarOpenCV } from '../leitor/opencv-loader.js';
 import { abrirCameraPrincipal, CameraErro, prepararCaptura, fotoEmAlta, aplicarZoom, ZOOM_MAX } from '../leitor/camera.js';
 import { codigoDe, igual, decidirQR, validarAssociacao as validarAssoc } from '../leitor/associacao.js';
 import { codigoDoQR } from '../leitor/qr-caderno.js';
-import { detectarMarcadores, lerQR, desenharRevisao } from '../leitor/leitor.js';
+import { lerQR, desenharRevisao } from '../leitor/leitor.js';
 import { calcularMoldura } from '../leitor/moldura.js';
 import { processarCartao, carregarParametros, salvarParametros, restaurarParametros, descreverCartao } from '../leitor/omr.js';
 
@@ -43,6 +43,9 @@ const DICA_BLOQUEIO = {
   versao_diferente: 'Os cartões já impressos continuam válidos para a conferência manual, mas precisam ser reimpressos para a leitura automática.',
   cartao_cortado: 'Dica: enquadre a folha inteira, deixando uma margem branca em volta dos 4 quadrados pretos.',
 };
+
+/** Lado maior (px) da imagem entregue ao OMR: o mesmo para a câmera interna e para ENVIAR FOTO. */
+const MAX_LADO_FOTO = 3200;
 
 const dorme = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -125,13 +128,13 @@ export default function leitura(params) {
   video.addEventListener('loadedmetadata', ajustarAlvo);
   video.addEventListener('resize', ajustarAlvo);
 
-  const fileInput = el('<input type="file" accept="image/*" capture="environment" hidden data-file />');
+  const fileInput = el('<input type="file" accept="image/*" hidden data-file />');
   const body = el('<div class="stack"></div>');
   root.append(body, cf, fileInput);
 
   const ov = {
     aberto: false, passo: 'qr', cv: null, cvErro: null, camErro: null,
-    marc: 0, ocupacao: null, ocupado: false, processando: false,
+    marc: 0, ocupacao: null, ocupado: false, processando: false, capturando: false,
     aviso: null, erro: null, escolha: null, escolhaCartao: null, timer: null, camInfo: null,
     zoom: null,            // zoom atual da câmera (1x = o mais aberto que o aparelho permite)
     caderno: null,         // { av, cartao } aguardando a confirmação do professor
@@ -153,7 +156,7 @@ export default function leitura(params) {
   }
 
   /** Foto escolhida na galeria/câmera nativa → imagem RGBA (respeita a orientação EXIF). */
-  async function imagemDoArquivo(arquivo, maxLado = 2400) {
+  async function imagemDoArquivo(arquivo, maxLado = MAX_LADO_FOTO) {
     let bmp;
     try {
       bmp = await createImageBitmap(arquivo, { imageOrientation: 'from-image' });
@@ -284,7 +287,7 @@ export default function leitura(params) {
     const qr = ov.passo === 'qr';
     const assinatura = JSON.stringify([
       qr, ov.marc, ov.ocupacao == null ? null : Math.round(ov.ocupacao * 10),
-      ov.processando, !!ov.cv, ov.cvErro, ov.camErro, ov.erro, ov.aviso,
+      ov.processando, ov.capturando, !!ov.cv, ov.cvErro, ov.camErro, ov.erro, ov.aviso,
       ov.escolha ? ov.escolha.map((a) => a.id) : null,
       ov.zoom, ov.caderno ? [ov.caderno.av?.id, ov.caderno.cartao?.caderno] : null,
     ]);
@@ -299,8 +302,8 @@ export default function leitura(params) {
       ? 'Confira o nome do caderno acima. Se não for este, toque em “Ler outro”.'
       : (qr
         ? 'Aponte para o QR Code do cartão, de frente e com boa luz.'
-        : 'Folha reta e os 4 quadrados pretos dentro das marcas da moldura.');
-    $cf('[data-cf-alvo]').className = 'cf-alvo ' + (qr ? 'qr' : 'cartao') + (!qr && ov.marc >= 2 ? ' ok' : '');
+        : 'Enquadre o cartão inteiro: os 4 cantos dentro da moldura. Ajuste a distância ou o zoom e toque no botão quando quiser fotografar.');
+    $cf('[data-cf-alvo]').className = 'cf-alvo ' + (qr ? 'qr' : 'cartao');
     ajustarAlvoDepois();
     // Passo do QR: o caderno só é identificado pela leitura do QR Code (sem digitar código).
     const bm = $cf('[data-cf-manual]');
@@ -311,19 +314,11 @@ export default function leitura(params) {
 
     let status = '', cls = '';
     if (ov.erro || confirma) { status = ''; }
-    else if (ov.processando) { status = 'Lendo o cartão…'; cls = 'busy'; }
+    else if (ov.processando) { status = ov.cv ? 'Lendo o cartão…' : 'Carregando o leitor óptico…'; cls = 'busy'; }
     else if (ov.camErro) { status = ov.camErro; cls = 'err'; }
     else if (ov.cvErro) { status = 'Não foi possível carregar o leitor óptico.'; cls = 'err'; }
-    else if (!ov.cv) { status = 'Carregando o leitor óptico…'; cls = 'busy'; }
-    else if (qr) { status = ov.aviso ? '' : 'Procurando o QR Code…'; }
-    else if (ov.marc >= 2) {
-      status = '4 marcadores encontrados — pode fotografar';
-      cls = 'ok';
-      if (ov.ocupacao != null && ov.ocupacao < 0.3) status = '4 marcadores encontrados — aproxime até preencher a moldura';
-    } else {
-      status = 'Procurando os 4 quadrados pretos…';
-      if (ov.ocupacao != null && ov.ocupacao < 0.2) status += ' Aproxime o cartão.';
-    }
+    else if (qr) { status = ov.aviso ? '' : (ov.cv ? 'Procurando o QR Code…' : 'Carregando o leitor óptico…'); cls = ov.cv ? '' : 'busy'; }
+    else { status = ''; }   // cartão: captura livre, a detecção dos marcadores só roda depois da foto
     const s = $cf('[data-cf-status]');
     s.textContent = status;
     s.className = 'cf-status ' + cls;
@@ -399,8 +394,10 @@ export default function leitura(params) {
     }
 
     const tirar = $cf('[data-cf-tirar]');
-    tirar.disabled = !ov.cv || !!ov.camErro || ov.processando || !!ov.erro || !!ov.escolha
-      || !!ov.caderno || (!qr && ov.marc < 2);
+    // Captura livre: não depende de detectar marcadores, QR, cartão nem de o leitor óptico já ter carregado.
+    // Só fica indisponível enquanto a câmera não funciona, durante a própria captura/leitura
+    // (evita foto duplicada) ou quando há uma pergunta aberta (escolha de avaliação / confirmação do caderno).
+    tirar.disabled = !!ov.camErro || ov.capturando || ov.processando || !!ov.escolha || !!ov.caderno;
   }
 
   /** Botão de zoom da câmera (1x, 2x, 3x). O zoom vale para a prévia e para a foto. */
@@ -488,9 +485,48 @@ export default function leitura(params) {
     };
   }
 
+  /** Esconde a foto congelada e volta a mostrar a prévia ao vivo da câmera. */
+  function mostrarPreviaAoVivo() {
+    $cf('[data-cf-img]').hidden = true;
+    video.hidden = false;
+  }
+
+  /** Espera o OpenCV terminar de carregar (a foto já foi capturada; só a leitura depende dele). */
+  async function aguardarLeitor() {
+    for (let i = 0; i < 1200 && ov.aberto && !ov.cv && !ov.cvErro; i++) await dorme(100);
+    return !!ov.cv;
+  }
+
+  /**
+   * ÚNICO caminho de leitura do cartão resposta — usado pela câmera interna e por ENVIAR FOTO.
+   * A única diferença entre os dois é a origem da imagem. Aqui acontece, depois da foto:
+   * detecção dos 4 marcadores, geometria, perspectiva, QR e OMR (tudo dentro de processarCartao).
+   */
+  async function processarFotoCartao(imagem) {
+    // congela a imagem na tela enquanto processa
+    try { $cf('[data-cf-img]').src = imagem.canvas.toDataURL('image/jpeg', 0.7); $cf('[data-cf-img]').hidden = false; } catch (_) { /* só visual */ }
+    ov.processando = true;
+    atualizarOverlay();
+    const pronto = await aguardarLeitor();
+    ov.processando = false;
+    if (!ov.aberto) return;
+    if (!pronto) {
+      ov.erro = 'Não foi possível carregar o leitor óptico. Verifique a internet e tente novamente.';
+      mostrarPreviaAoVivo();
+      atualizarOverlay();
+      return;
+    }
+    await processarImagem(imagem);
+  }
+
   async function processarImagem(imagem) {
     const av = avaliacao();
-    if (!av || !ov.cv) return;
+    if (!av || !ov.cv) {
+      ov.erro = !av ? 'Nenhuma avaliação associada a esta leitura. Volte e leia o QR Code do caderno.' : 'O leitor óptico não está pronto. Tente novamente.';
+      mostrarPreviaAoVivo();
+      atualizarOverlay();
+      return;
+    }
     ov.processando = true;
     atualizarOverlay();
     await dorme(30); // deixa o "Lendo o cartão…" aparecer antes do trabalho pesado
@@ -507,6 +543,7 @@ export default function leitura(params) {
     if (!r.ok) {
       // O motivo vem pronto do pipeline (cortado, outra versão, outra avaliação, grade…).
       ov.erro = [r.mensagem || 'Não foi possível ler este cartão.', DICA_BLOQUEIO[r.motivo]].filter(Boolean).join(' ');
+      mostrarPreviaAoVivo();   // volta à câmera: o botão de captura continua disponível para tentar de novo
       atualizarOverlay();
       return;
     }
@@ -542,20 +579,20 @@ export default function leitura(params) {
    * subindo a câmera só durante a captura e voltando para a pré-visualização.
    */
   async function capturarFotoFinal() {
-    if (!stream) return quadroDoVideo(2400);
+    if (!stream) return quadroDoVideo(MAX_LADO_FOTO);
     try {
       const blob = await fotoEmAlta(stream);
-      if (blob) return await imagemDoArquivo(blob, 3200);
+      if (blob) return await imagemDoArquivo(blob, MAX_LADO_FOTO);
     } catch (e) {
       console.warn('[SICEP+] ImageCapture:', e);
     }
     const track = stream.getVideoTracks()[0];
-    if (!track || !ov.camInfo?.maxima?.largura) return quadroDoVideo(2400);
+    if (!track || !ov.camInfo?.maxima?.largura) return quadroDoVideo(MAX_LADO_FOTO);
     const restaurar = await prepararCaptura(track, ov.camInfo);
     try {
       if (ov.zoom) await aplicarZoom(track, ov.zoom);   // mantém o zoom escolhido na foto
       await esperarQuadroMaior();
-      return quadroDoVideo(3200);
+      return quadroDoVideo(MAX_LADO_FOTO);
     } finally {
       await restaurar();
       if (ov.zoom) await aplicarZoom(track, ov.zoom);   // e ao voltar para a prévia
@@ -563,29 +600,37 @@ export default function leitura(params) {
   }
 
   async function tirarFoto() {
-    if (!ov.cv || ov.processando || ov.erro) return;
-    await aguardarLivre();
-    if (ov.passo === 'qr') {
-      const q = quadroDoVideo(1600);
-      if (!q) return;
-      ov.ocupado = true;
-      try {
-        const t = await lerQR(ov.cv, q, q.canvas);
-        if (t) tratarQR(t); else avisoTemporario('QR Code não encontrado. Aproxime, centralize e tente de novo.');
-      } finally { ov.ocupado = false; }
-      return;
-    }
-    ov.ocupado = true;
-    let q = null;
+    if (ov.capturando || ov.processando || ov.escolha || ov.caderno || ov.camErro) return;   // evita foto duplicada
+    ov.capturando = true;
+    if (ov.erro) { ov.erro = null; mostrarPreviaAoVivo(); }   // nova tentativa depois de uma falha
+    atualizarOverlay();
     try {
-      q = await capturarFotoFinal();
+      await aguardarLivre();
+      if (ov.passo === 'qr') {
+        if (!ov.cv) { avisoTemporario('Aguarde o leitor óptico terminar de carregar.'); return; }
+        const q = quadroDoVideo(1600);
+        if (!q) return;
+        ov.ocupado = true;
+        try {
+          const t = await lerQR(ov.cv, q, q.canvas);
+          if (t) tratarQR(t); else avisoTemporario('QR Code não encontrado. Aproxime, centralize e tente de novo.');
+        } finally { ov.ocupado = false; }
+        return;
+      }
+      // Passo do cartão: captura livre. Nenhum marcador precisa ter sido detectado antes.
+      ov.ocupado = true;
+      let q = null;
+      try {
+        q = await capturarFotoFinal();
+      } finally {
+        ov.ocupado = false;
+      }
+      if (!q) { ov.erro = 'Não consegui capturar a imagem da câmera. Tente novamente.'; return; }
+      await processarFotoCartao(q);
     } finally {
-      ov.ocupado = false;
+      ov.capturando = false;
+      if (ov.aberto) atualizarOverlay();
     }
-    if (!q) return;
-    // congela a imagem na tela enquanto processa
-    try { $cf('[data-cf-img]').src = q.canvas.toDataURL('image/jpeg', 0.7); $cf('[data-cf-img]').hidden = false; } catch (_) { /* só visual */ }
-    await processarImagem(q);
   }
 
   $cf('[data-cf-tirar]').addEventListener('click', tirarFoto);
@@ -606,26 +651,18 @@ export default function leitura(params) {
       if (t && ov.aberto) tratarQR(t);
       return;
     }
-    const q = quadroDoVideo(520);
-    if (!q) return;
-    const r = detectarMarcadores(ov.cv, q, { maxLado: 520 });
-    // Verde no primeiro quadro bom e só apaga depois de 3 quadros ruins seguidos.
-    // Antes eram 2 acertos SEGUIDOS e qualquer falha zerava: com um quadro tremido no
-    // meio parecia que o enquadramento nunca ficava verde.
-    ov.marc = r.ok ? 3 : Math.max(0, ov.marc - 1);
-    if (r.ok) ov.ocupacao = r.ocupacao;
-    atualizarOverlay();   // só redesenha quando algo muda (ver assinatura em atualizarOverlay)
+    // Passo do cartão: sem análise da prévia. Os marcadores só são procurados depois da foto.
   }
 
   async function ciclo() {
     ov.timer = null;
     if (!ov.aberto) return;
     if (document.hidden) { ov.timer = setTimeout(ciclo, 1000); return; }   // aba em segundo plano: não gasta CPU
-    if (ov.cv && !ov.processando && !ov.erro && !ov.ocupado && video.videoWidth) {
+    if (ov.passo === 'qr' && ov.cv && !ov.processando && !ov.capturando && !ov.erro && !ov.ocupado && video.videoWidth) {
       ov.ocupado = true;
       try { await analisarQuadro(); } catch (e) { console.warn('[SICEP+] leitura ao vivo:', e); } finally { ov.ocupado = false; }
     }
-    if (ov.aberto) ov.timer = setTimeout(ciclo, ov.passo === 'qr' ? 500 : 170);
+    if (ov.aberto) ov.timer = setTimeout(ciclo, 500);
   }
 
   /* ---- abrir / fechar ---- */
@@ -761,22 +798,29 @@ export default function leitura(params) {
     ev.target.value = '';
     if (!arquivo) return;
     if (!ov.aberto) return;
-    if (!ov.cv) { avisoTemporario('Aguarde o leitor óptico terminar de carregar.'); return; }
+    if (ov.capturando || ov.processando) return;
+    ov.capturando = true;
+    ov.erro = null;
+    atualizarOverlay();
     try {
-      const imagem = await imagemDoArquivo(arquivo);
+      const imagem = await imagemDoArquivo(arquivo, MAX_LADO_FOTO);   // mesma resolução da foto da câmera, com EXIF aplicado
       await aguardarLivre();
       if (ov.passo === 'qr') {
+        if (!ov.cv) { avisoTemporario('Aguarde o leitor óptico terminar de carregar.'); return; }
         ov.ocupado = true;
         try {
           const t = await lerQR(ov.cv, imagem, imagem.canvas);
           if (t) tratarQR(t); else avisoTemporario('Não encontrei o QR Code nesta foto.');
         } finally { ov.ocupado = false; }
       } else {
-        await processarImagem(imagem);
+        await processarFotoCartao(imagem);   // o mesmo caminho da câmera interna
       }
     } catch (e) {
       ov.erro = e?.message || 'Não consegui abrir a foto.';
-      atualizarOverlay();
+      mostrarPreviaAoVivo();
+    } finally {
+      ov.capturando = false;
+      if (ov.aberto) atualizarOverlay();
     }
   });
 

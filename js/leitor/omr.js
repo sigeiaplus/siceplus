@@ -60,9 +60,14 @@ export function restaurarParametros() {
  */
 const MOTIVOS = {
   mais_de_50: () => 'O cartão comporta no máximo 50 questões.',
-  marcadores: (c) => (c.achados >= 2
-    ? `Encontrei apenas ${c.achados} dos 4 quadrados pretos dos cantos. O cartão pode estar cortado na foto — afaste um pouco a câmera e enquadre a folha inteira.`
-    : 'Não achei os 4 quadrados pretos dos cantos. Mostre o cartão inteiro, com boa luz e sem sombra.'),
+  // `achados` conta formas escuras candidatas (não só marcadores). Com 4 ou mais, o problema não é
+  // "faltam quadrados": eles existem, mas não formam o retângulo do cartão (foto muito inclinada,
+  // cartão dobrado, ângulo extremo). Só a mensagem muda; os critérios de detecção são os mesmos.
+  marcadores: (c) => (c.achados >= 4
+    ? 'Não foi possível identificar a geometria do cartão: achei formas escuras na foto, mas elas não formam os 4 cantos da folha. Isso acontece com a foto muito inclinada, o cartão dobrado, sombra forte ou parte da folha fora da imagem. Fotografe de frente, com a folha inteira, reta e bem iluminada.'
+    : c.achados >= 2
+      ? `Encontrei apenas ${c.achados} dos 4 quadrados pretos dos cantos. O cartão pode estar cortado na foto — afaste um pouco a câmera e enquadre a folha inteira.`
+      : 'Não achei os 4 quadrados pretos dos cantos. Mostre o cartão inteiro, com boa luz e sem sombra.'),
   cartao_cortado: () => 'Os quadrados dos cantos estão na beirada da foto: o cartão foi cortado. Afaste a câmera e enquadre a folha inteira, com uma margem em volta.',
   alinhamento: () => 'Os quadrados dos cantos não bateram com o cartão. Fotografe de frente, sem dobras e com os 4 quadrados inteiros dentro da foto — se algum canto estiver cortado, o cartão não é lido.',
   versao_diferente: (c) => `Este cartão foi impresso com o layout v${c.geometria} do cartão-resposta e o SICEP+ atual usa o v${GEOMETRIA_VERSAO}. Gere e imprima um cartão novo desta avaliação (aba Cartões).`,
