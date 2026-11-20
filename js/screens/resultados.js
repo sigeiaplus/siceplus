@@ -9,8 +9,8 @@ import {
  *
  * Regras que valem aqui:
  * - O professor seleciona alunos, abre a revisão e confirma CADA resultado.
- * - Só resultado confirmado (e de avaliação marcada para o SIDED+) entra na conta
- *   do botão "ENVIAR X NOTAS AO SIDED+".
+ * - O ENVIO ao SIDED+ NÃO é feito aqui: fica somente na tela da Avaliação
+ *   (que usa o trimestre definido na criação). Aqui só se consulta o estado.
  * - Reler volta ao fluxo da câmera (QR do caderno → cartão) sem duplicar registro.
  * - Excluir pede confirmação e não apaga a nota já lançada no SIDED+.
  */
@@ -25,8 +25,6 @@ export default function resultados() {
     turmaFiltro: 'todas',
     busca: '',
     sel: new Set(),
-    trimestre: '1',
-    enviando: false,
   };
 
   const confirmado = (r) => r.status === 'confirmado';
@@ -49,30 +47,7 @@ export default function resultados() {
     });
   };
 
-  /** Um grupo de envio = uma avaliação em uma turma (o SIDED+ tem uma avaliação por turma). */
-  function gruposParaEnvio() {
-    const mapa = new Map();
-    st.sel.forEach((id) => {
-      const r = store.resultados().find((x) => x.id === id);
-      if (!r || !confirmado(r) || r.nota == null) return;
-      const av = store.avaliacao(r.avaliacao_id);
-      if (!av || !av.lancar_sided) return;
-      if (!store.aplicacaoDe(av, r.turma_id)) return;
-      const chave = `${r.avaliacao_id}:${r.turma_id}`;
-      if (!mapa.has(chave)) {
-        mapa.set(chave, { avaliacaoId: r.avaliacao_id, turmaId: r.turma_id, ids: [], av, turma: store.turma(r.turma_id) });
-      }
-      mapa.get(chave).ids.push(r.id);
-    });
-    return [...mapa.values()];
-  }
-
   const selecionados = () => store.resultados().filter((r) => st.sel.has(r.id));
-  const pendentesSel = () => selecionados().filter((r) => !confirmado(r));
-  const semIntegracaoSel = () => selecionados().filter((r) => {
-    const av = store.avaliacao(r.avaliacao_id);
-    return !av?.lancar_sided;
-  });
 
   /* ---------------- Linha da lista ---------------- */
 
@@ -110,14 +85,14 @@ export default function resultados() {
         </div>
 
         <div class="res-acts">
-          <button class="btn btn-outline btn-sm" type="button" data-revisar="${esc(r.id)}">
+          <button class="btn ${ok ? 'btn-outline' : 'btn-primary'} btn-sm" type="button" data-revisar="${esc(r.id)}" aria-label="Revisar o resultado de ${esc(nome)}">
             ${icon('check', 14)} Revisar
           </button>
-          <a class="btn btn-ghost btn-sm" href="#/leitura/${esc(r.avaliacao_id)}/${esc(r.aluno_id)}" title="Reler o cartão deste aluno">
+          <button class="btn btn-outline btn-sm" type="button" data-reler="${esc(r.id)}" title="Ler o cartão deste aluno novamente" aria-label="Reler o cartão de ${esc(nome)}">
             ${icon('camera', 14)} Reler
-          </a>
+          </button>
           <button class="btn btn-ghost btn-sm" type="button" data-excluir="${esc(r.id)}" aria-label="Excluir resultado de ${esc(nome)}">
-            ${icon('trash', 14)}
+            ${icon('trash', 14)} Excluir
           </button>
         </div>
       </div>`;
@@ -228,41 +203,6 @@ export default function resultados() {
     desenhar();
   }
 
-  /* ---------------- Envio ---------------- */
-
-  async function enviar() {
-    const grupos = gruposParaEnvio();
-    const total = grupos.reduce((s, g) => s + g.ids.length, 0);
-    if (!total) return;
-
-    const descricao = grupos
-      .map((g) => `• ${g.av.titulo} — ${g.turma?.nome || 'turma'}: ${g.ids.length} nota(s)`)
-      .join('\n');
-    const confirmar = window.confirm(
-      `Enviar ${total} nota(s) revisada(s) ao SIDED+?\n\n${descricao}\n\nTrimestre: ${st.trimestre}º\n\n` +
-      'Alunos ainda sem revisão confirmada NÃO serão enviados.'
-    );
-    if (!confirmar) return;
-
-    st.enviando = true;
-    pintar();
-
-    let enviados = 0;
-    const erros = [];
-    for (const g of grupos) {
-      const r = await store.enviarAoSided(g.avaliacaoId, g.turmaId, Number(st.trimestre), g.ids);
-      if (r.ok) enviados += r.enviados;
-      else erros.push(`${g.turma?.nome || 'Turma'}: ${r.erro}`);
-    }
-
-    st.enviando = false;
-    st.sel.clear();
-    pintar();
-
-    if (erros.length) toast(`${enviados} nota(s) enviadas. Falhou em ${erros.length} turma(s): ${erros[0]}`, 'err');
-    else toast(`${enviados} nota(s) revisadas enviadas ao SIDED+.`, 'ok');
-  }
-
   /* ---------------- Render ---------------- */
 
   function pintar() {
@@ -276,17 +216,11 @@ export default function resultados() {
     const turmas = store.turmasDoProfessor(store.sessao()?.professor_id).slice()
       .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
 
-    const confirmadasSel = selecionados().filter((r) => confirmado(r) && r.nota != null).length;
-    const grupos = gruposParaEnvio();
-    const paraEnviar = grupos.reduce((s, g) => s + g.ids.length, 0);
-    const pendentes = pendentesSel().length;
-    const foraIntegracao = semIntegracaoSel().length;
-
     root.innerHTML = `
       <div class="page-head res-head-page">
         <span class="eyebrow">Resultados</span>
         <h1>Notas e desempenho</h1>
-        <p>Revise aluno por aluno. Só o que você confirmar é enviado ao SIDED+.</p>
+        <p>Revise, releia ou exclua cada resultado. O envio ao SIDED+ é feito na tela da <a href="#/avaliacoes">Avaliação</a>.</p>
       </div>
 
       <div class="res-kpis">
@@ -360,24 +294,9 @@ export default function resultados() {
           <a class="btn btn-primary" href="#/leitura">Corrigir cartões</a>
         </div>`}
 
-      <div class="res-enviar ${paraEnviar ? 'on' : ''}">
-        <div class="re-txt">
-          <strong>${paraEnviar} nota(s) revisada(s) pronta(s) para envio</strong>
-          <span class="xs muted">
-            ${st.sel.size === 0
-              ? 'Selecione os alunos e confirme a revisão de cada um.'
-              : `${pendentes} selecionada(s) ainda sem confirmação${foraIntegracao ? ` · ${foraIntegracao} sem integração SIDED+` : ''}`}
-          </span>
-        </div>
-        <label class="re-tri">
-          <span class="xs muted">Trimestre</span>
-          <select class="select" data-tri>
-            ${[1, 2, 3].map((t) => `<option value="${t}" ${String(t) === st.trimestre ? 'selected' : ''}>${t}º</option>`).join('')}
-          </select>
-        </label>
-        <button class="btn btn-primary res-enviar-btn" type="button" data-enviar ${paraEnviar && !st.enviando ? '' : 'disabled'}>
-          ${icon('cloud', 16)} ${st.enviando ? 'Enviando…' : `ENVIAR ${paraEnviar} NOTA${paraEnviar === 1 ? '' : 'S'} AO SIDED+`}
-        </button>
+      <div class="alert y">
+        ${icon('info', 16)}
+        <span>Para enviar notas ao SIDED+, abra a avaliação em <a href="#/avaliacoes">Avaliações</a>. Só entram as notas revisadas e confirmadas que ainda não foram enviadas.</span>
       </div>
     `;
 
@@ -424,8 +343,9 @@ export default function resultados() {
         if (c.checked) st.sel.add(id); else st.sel.delete(id);
         const linha = c.closest('.res-row');
         if (linha) linha.classList.toggle('sel', c.checked);
-        // Atualiza somente a barra de envio (evita perder a posição da lista).
-        atualizarBarra();
+        // Só marca a linha, sem redesenhar a lista (evita perder a posição de rolagem).
+        const b = root.querySelector('[data-revisar-sel]');
+        if (b) b.disabled = st.sel.size === 0;
       });
     });
 
@@ -436,6 +356,17 @@ export default function resultados() {
         const r = store.resultados().find((x) => x.id === id);
         if (r && !confirmado(r)) st.sel.add(id);
         abrirRevisao([id]);
+      });
+    });
+
+    root.querySelectorAll('[data-reler]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const r = store.resultados().find((x) => x.id === b.dataset.reler);
+        if (!r) return;
+        if (r.enviado_em && !window.confirm(
+          'Esta nota já foi enviada ao SIDED+.\n\nA nova leitura altera só o resultado no SICEP+; a nota no SIDED+ não será modificada.\n\nReler o cartão?'
+        )) return;
+        location.hash = `#/leitura/${r.avaliacao_id}/${r.aluno_id}`;
       });
     });
 
@@ -465,31 +396,6 @@ export default function resultados() {
       });
     });
 
-    root.querySelector('[data-tri]').addEventListener('change', (e) => {
-      st.trimestre = e.target.value;
-      pintar();
-    });
-    root.querySelector('[data-enviar]').addEventListener('click', enviar);
-  }
-
-  /** Barra de envio recalculada sem redesenhar a lista inteira. */
-  function atualizarBarra() {
-    const barra = root.querySelector('.res-enviar');
-    if (!barra) return;
-    const grupos = gruposParaEnvio();
-    const paraEnviar = grupos.reduce((s, g) => s + g.ids.length, 0);
-    const pendentes = pendentesSel().length;
-    const fora = semIntegracaoSel().length;
-
-    barra.classList.toggle('on', paraEnviar > 0);
-    barra.querySelector('.re-txt strong').textContent = `${paraEnviar} nota(s) revisada(s) pronta(s) para envio`;
-    barra.querySelector('.re-txt span').textContent = st.sel.size === 0
-      ? 'Selecione os alunos e confirme a revisão de cada um.'
-      : `${pendentes} selecionada(s) ainda sem confirmação${fora ? ` · ${fora} sem integração SIDED+` : ''}`;
-
-    const b = barra.querySelector('[data-enviar]');
-    b.disabled = !paraEnviar || st.enviando;
-    b.innerHTML = `${icon('cloud', 16)} ${st.enviando ? 'Enviando…' : `ENVIAR ${paraEnviar} NOTA${paraEnviar === 1 ? '' : 'S'} AO SIDED+`}`;
   }
 
   pintar();

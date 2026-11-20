@@ -16,6 +16,7 @@ export default function novaAvaliacao(params) {
     descricao: '',
     data_aplicacao: new Date().toISOString().slice(0, 10),
     prazo_correcao: '',
+    trimestre: '',
     valor_total: '10',
     num_questoes: '10',
     num_alternativas: '5',
@@ -37,6 +38,7 @@ export default function novaAvaliacao(params) {
     st.descricao = avEdicao.descricao || '';
     st.data_aplicacao = avEdicao.data_aplicacao || st.data_aplicacao;
     st.prazo_correcao = avEdicao.prazo_correcao ? String(avEdicao.prazo_correcao).slice(0, 16) : '';
+    st.trimestre = avEdicao.trimestre ? String(avEdicao.trimestre) : '';
     st.valor_total = String(avEdicao.valor_total ?? 10);
     st.num_questoes = String(avEdicao.questoes.length || 10);
     st.num_alternativas = String(avEdicao.layout?.num_alternativas || avEdicao.questoes[0]?.num_alternativas || 5);
@@ -88,6 +90,9 @@ export default function novaAvaliacao(params) {
     if (i === 3) {
       if (!st.titulo.trim()) return 'Informe o título da avaliação.';
       if (!st.data_aplicacao) return 'Informe a data de aplicação.';
+      if (st.integra_sided && store.tem('trimestre') && !['1', '2', '3'].includes(String(st.trimestre))) {
+        return 'Escolha o trimestre da avaliação: ele será usado no envio ao SIDED+.';
+      }
       const v = Number(st.valor_total);
       if (!(v > 0)) return 'Informe um valor total maior que zero.';
       const n = Number(st.num_questoes);
@@ -247,6 +252,22 @@ export default function novaAvaliacao(params) {
             </div>
           </div>
 
+          ${store.tem('trimestre') ? `
+          <div class="field">
+            <label class="label" for="trimestre">Trimestre${st.integra_sided ? '' : ' <span class="muted small">(opcional)</span>'}</label>
+            <select id="trimestre" class="select" data-campo="trimestre" ${avEdicao && store.trimestreTravado(avEdicao) ? 'disabled' : ''}>
+              <option value="" ${st.trimestre ? '' : 'selected'}>Selecione</option>
+              ${[1, 2, 3].map((t) => `<option value="${t}" ${String(t) === String(st.trimestre) ? 'selected' : ''}>${t}º trimestre</option>`).join('')}
+            </select>
+            <span class="hint">${avEdicao && store.trimestreTravado(avEdicao)
+              ? 'Já há notas enviadas ao SIDED+ desta avaliação; o trimestre não pode mais ser alterado.'
+              : 'Usado no envio ao SIDED+. Você não precisará escolher de novo na hora de enviar.'}</span>
+          </div>` : `
+          <div class="alert y">${icon('info', 16)}
+            <span>O trimestre depende da coluna <span class="mono xs">trimestre</span> em
+            <span class="mono xs">sicep_avaliacoes</span>, que ainda não existe no banco. Sem ela não é possível enviar notas ao SIDED+.</span>
+          </div>`}
+
           ${store.tem('prazo') ? `
           <div class="field">
             <label class="label" for="prazo">Prazo para correção <span class="muted small">(opcional)</span></label>
@@ -348,6 +369,7 @@ export default function novaAvaliacao(params) {
           <div><span class="k">Turmas</span><span class="v">${st.turmasSel.map((t) => esc(store.turma(t)?.nome || '')).join(' · ')}</span></div>
           <div><span class="k">Disciplinas</span><span class="v">${st.turmasSel.map((t) => esc(store.disciplina(store.vinculo(st.vinculos[t])?.disciplina_id)?.nome || '')).join(' · ')}</span></div>
           <div><span class="k">Aplicação</span><span class="v">${fmtData(st.data_aplicacao)}</span></div>
+          ${store.tem('trimestre') ? `<div><span class="k">Trimestre</span><span class="v">${st.trimestre ? st.trimestre + 'º' : 'não definido'}</span></div>` : ''}
           ${store.tem('prazo') ? `<div><span class="k">Prazo de correção</span><span class="v">${st.prazo_correcao ? fmtDataHora(st.prazo_correcao) : 'sem prazo'}</span></div>` : ''}
           <div><span class="k">Valor total</span><span class="v">${fmtNota(st.valor_total)} pontos</span></div>
           <div><span class="k">Questões</span><span class="v">${st.questoes.length} · ${st.num_alternativas} alternativas</span></div>
@@ -501,6 +523,7 @@ export default function novaAvaliacao(params) {
         descricao: st.descricao.trim(),
         data_aplicacao: st.data_aplicacao,
         prazo_correcao: st.prazo_correcao || null,
+        trimestre: st.trimestre ? Number(st.trimestre) : null,
         valor_total: Number(st.valor_total),
         num_alternativas: Number(st.num_alternativas),
         lancar_sided: st.integra_sided,

@@ -185,7 +185,7 @@ export async function carregarContexto() {
 export async function detectarRecursos() {
   const recursos = {
     prazo: false, faixas: false, anulada: false, situacao: false, status: false,
-    turma_disciplina: false, revisado: false, enviado: false,
+    turma_disciplina: false, revisado: false, enviado: false, trimestre: false,
   };
 
   const teste = async (path, chave) => {
@@ -206,6 +206,7 @@ export async function detectarRecursos() {
     teste('sicep_resultados?select=turma_disciplina_id', 'turma_disciplina'),
     teste('sicep_resultados?select=revisado_em', 'revisado'),
     teste('sicep_resultados?select=enviado_sided_em', 'enviado'),
+    teste('sicep_avaliacoes?select=trimestre', 'trimestre'),
   ]);
 
   return recursos;
@@ -217,6 +218,7 @@ export async function carregarAvaliacoes(usuarioId, recursos) {
   const extras = [];
   if (recursos?.prazo) extras.push('prazo_correcao');
   if (recursos?.faixas) extras.push('faixa_verde', 'faixa_amarela');
+  if (recursos?.trimestre) extras.push('trimestre');
 
   const colunasQuestao = ['id', 'numero', 'enunciado', 'valor', 'num_alternativas', 'gabarito'];
   if (recursos?.anulada) colunasQuestao.push('anulada');
@@ -242,6 +244,8 @@ export async function carregarAvaliacoes(usuarioId, recursos) {
     valor_total: Number(a.valor_total || 0),
     data_aplicacao: a.data_aplicacao,
     prazo_correcao: a.prazo_correcao || null,
+    // Sem valor presumido: avaliação antiga fica com trimestre null até o professor definir.
+    trimestre: a.trimestre != null ? Number(a.trimestre) : null,
     faixas: {
       verde: a.faixa_verde != null ? Number(a.faixa_verde) : 80,
       amarelo: a.faixa_amarela != null ? Number(a.faixa_amarela) : 60,
@@ -284,6 +288,7 @@ export async function criarAvaliacao(dados, usuarioId) {
       status: 'pronta',
       turmas_ids: dados.turmas_ids,
       ...(dados.prazo_correcao ? { prazo_correcao: dados.prazo_correcao } : {}),
+      ...(dados.trimestre ? { trimestre: dados.trimestre } : {}),
       ...(dados.faixas ? { faixa_verde: dados.faixas.verde, faixa_amarela: dados.faixas.amarelo } : {}),
     }),
   });
@@ -505,7 +510,30 @@ export async function enviarNotasSided({ avaliacaoSicep, turma, turmaDisciplinaI
     criada = true;
   }
 
-  const notas = items.map((i) => ({
+  // Proteção: nota que já existe no SIDED+ com valor DIFERENTE não é sobrescrita
+  // (o professor pode ter editado lá, ou o resultado foi excluído e relido aqui).
+  // Nota igual não precisa ser gravada de novo; conta como enviada.
+  const conflitos = [];
+  let itensGravar = items;
+  const existentes = new Map();
+  if (!criada && items.length) {
+    const ids = items.map((i) => i.aluno_id).join(',');
+    const linhas = await api(
+      `notas?avaliacao_id=eq.${sided.id}&aluno_id=in.(${ids})&select=aluno_id,nota`
+    ) || [];
+    linhas.forEach((l) => existentes.set(l.aluno_id, l.nota));
+    itensGravar = items.filter((i) => {
+      const atual = existentes.get(i.aluno_id);
+      if (atual == null) return true;
+      if (Math.abs(Number(atual) - Number(i.nota)) < 0.005) return false;
+      conflitos.push(i.aluno_id);
+      return false;
+    });
+  }
+  const jaIguais = items.filter((i) => existentes.has(i.aluno_id) && existentes.get(i.aluno_id) != null
+    && !conflitos.includes(i.aluno_id)).map((i) => i.aluno_id);
+
+  const notas = itensGravar.map((i) => ({
     avaliacao_id: sided.id,
     aluno_id: i.aluno_id,
     nota: i.nota,
@@ -523,7 +551,13 @@ export async function enviarNotasSided({ avaliacaoSicep, turma, turmaDisciplinaI
     });
   }
 
-  return { sided_avaliacao_id: sided.id, enviados: notas.length, criada };
+  return {
+    sided_avaliacao_id: sided.id,
+    enviados: notas.length + jaIguais.length,
+    enviadosAlunos: [...notas.map((n) => n.aluno_id), ...jaIguais],
+    conflitos,
+    criada,
+  };
 }
 
 export { api };

@@ -44,7 +44,7 @@ const vazio = () => ({
 let db = vazio();
 let estado = 'carregando'; // carregando | sem-config | sem-sessao | erro | pronto
 let erro = null;
-let recursos = { prazo: false, faixas: false, anulada: false, situacao: false, turma_disciplina: false };
+let recursos = { prazo: false, faixas: false, anulada: false, situacao: false, turma_disciplina: false, trimestre: false };
 
 // Precisão de nota: até 10 casas decimais (0,25 não vira 0,3).
 const arred = (n) => Math.round((Number(n) || 0) * 1e10) / 1e10;
@@ -301,6 +301,7 @@ export async function criarAvaliacao(dados) {
     num_alternativas: Number(dados.num_alternativas),
     questoes: dados.questoes,
     prazo_correcao: recursos.prazo ? dados.prazo_correcao : null,
+    trimestre: recursos.trimestre ? (Number(dados.trimestre) || null) : null,
     faixas: recursos.faixas ? dados.faixas : null,
   }, db.sessao.usuario_id);
 
@@ -312,6 +313,7 @@ export async function criarAvaliacao(dados) {
     valor_total: Number(dados.valor_total),
     data_aplicacao: dados.data_aplicacao,
     prazo_correcao: recursos.prazo ? dados.prazo_correcao : null,
+    trimestre: recursos.trimestre ? (Number(dados.trimestre) || null) : null,
     faixas: recursos.faixas ? dados.faixas : { verde: 80, amarelo: 60 },
     modo: 'impresso',
     lancar_sided: !!dados.lancar_sided,
@@ -362,6 +364,8 @@ export async function salvarAvaliacao(dados) {
       lancar_sided: !!dados.lancar_sided,
       turmas_ids: dados.aplicacoes.map((a) => a.turma_id),
       ...(recursos.prazo && dados.prazo_correcao ? { prazo_correcao: dados.prazo_correcao } : {}),
+      // Depois de enviar notas, o trimestre não muda: a avaliação espelhada no SIDED+ já foi criada nele.
+      ...(recursos.trimestre && dados.trimestre && !trimestreTravado(av) ? { trimestre: Number(dados.trimestre) } : {}),
       ...(recursos.faixas ? { faixa_verde: Number(dados.faixas.verde), faixa_amarela: Number(dados.faixas.amarelo) } : {}),
     };
 
@@ -655,53 +659,143 @@ export function resumo() {
 
 /* ---------------- SIDED+ ---------------- */
 
-export async function enviarAoSided(avaliacaoId, turmaId, trimestre = 1, resultadoIds = null) {
+/** Trimestre não muda depois que alguma nota da avaliação foi enviada ao SIDED+. */
+export function trimestreTravado(av) {
+  return !!av && db.resultados.some((r) => r.avaliacao_id === av.id && r.enviado_em);
+}
+
+/** Define/corrige o trimestre de uma avaliação (usado nas avaliações antigas sem trimestre). */
+export async function definirTrimestre(avaliacaoId, trimestre) {
+  const av = avaliacao(avaliacaoId);
+  const tri = Number(trimestre);
+  if (!av) return { ok: false, erro: 'Avaliação não encontrada.' };
+  if (![1, 2, 3].includes(tri)) return { ok: false, erro: 'Escolha o 1º, 2º ou 3º trimestre.' };
+  if (!recursos.trimestre) {
+    return { ok: false, erro: 'A coluna trimestre ainda não existe em sicep_avaliacoes. Execute a migração SQL antes.' };
+  }
+  if (trimestreTravado(av)) {
+    return { ok: false, erro: 'Já há notas enviadas ao SIDED+ desta avaliação; o trimestre não pode mais ser alterado aqui.' };
+  }
+  try {
+    await nuvem.api(`sicep_avaliacoes?id=eq.${av.id}`, { method: 'PATCH', body: JSON.stringify({ trimestre: tri }) });
+  } catch (e) {
+    return { ok: false, erro: 'Falha ao salvar o trimestre: ' + e.message };
+  }
+  av.trimestre = tri;
+  return { ok: true };
+}
+
+/** Resultados prontos para envio: revisados, confirmados, com nota e AINDA NÃO enviados. */
+export function pendentesDeEnvio(avaliacaoId, turmaId) {
+  const idsAlunos = new Set(db.alunos.filter((a) => a.turma_id === turmaId).map((a) => a.id));
+  return resultadosDaAvaliacao(avaliacaoId, turmaId)
+    .filter((r) => r.status === 'confirmado' && r.nota != null && !r.enviado_em && idsAlunos.has(r.aluno_id));
+}
+
+export function jaEnviados(avaliacaoId, turmaId) {
+  return resultadosDaAvaliacao(avaliacaoId, turmaId).filter((r) => r.enviado_em);
+}
+
+/**
+ * Envia ao SIDED+ as notas revisadas e ainda não enviadas de uma avaliação em uma turma.
+ * O trimestre vem da própria avaliação (definido na criação). `resultadoIds` restringe o envio
+ * (usado para tentar de novo só o que falhou).
+ *
+ * Retorna { ok, enviados, falhas: [{ resultado_id, aluno_id, erro }], aviso }.
+ * Falha parcial não desfaz o que já foi enviado: cada nota enviada é marcada na hora.
+ */
+export async function enviarAoSided(avaliacaoId, turmaId, resultadoIds = null) {
   const av = avaliacao(avaliacaoId);
   const apl = aplicacaoDe(av, turmaId);
   if (!av || !apl) return { ok: false, erro: 'Avaliação/turma não encontrada.' };
   if (!av.lancar_sided) return { ok: false, erro: 'Esta avaliação não está marcada para lançar no SIDED+.' };
+  if (![1, 2, 3].includes(Number(av.trimestre))) {
+    return { ok: false, erro: 'Esta avaliação não tem trimestre definido. Defina o trimestre antes de enviar.' };
+  }
 
-  const idsAlunos = new Set(db.alunos.filter((a) => a.turma_id === turmaId).map((a) => a.id));
   const pedidos = resultadoIds ? new Set(resultadoIds) : null;
-  const lista = resultadosDaAvaliacao(av.id, turmaId).filter((r) => {
-    if (pedidos && !pedidos.has(r.id)) return false;
-    return r.status === 'confirmado' && r.nota != null && idsAlunos.has(r.aluno_id);
+  const lista = pendentesDeEnvio(av.id, turmaId).filter((r) => !pedidos || pedidos.has(r.id));
+  if (!lista.length) return { ok: false, erro: 'Nenhuma nota revisada, confirmada e ainda não enviada.' };
+
+  const base = () => ({
+    avaliacaoSicep: { ...av, sided_avaliacao_id: av.sided_avaliacao_id || apl.sided_avaliacao_id },
+    turma: turma(turmaId),
+    turmaDisciplinaId: apl.turma_disciplina_id,
+    professorId: apl.professor_id,
+    trimestre: Number(av.trimestre),
   });
-  if (!lista.length) return { ok: false, erro: 'Nenhuma nota revisada e confirmada para enviar.' };
+  const itemDe = (x) => ({ aluno_id: x.aluno_id, nota: x.nota, situacao: x.situacao });
+  const MSG_CONFLITO = 'Já existe no SIDED+ uma nota diferente para este aluno. Ela não foi sobrescrita; confira no SIDED+.';
 
+  const enviadosIds = [];
+  const falhas = [];
+  let ultimoSided = null;
+
+  // Caminho rápido: um único envio. Se ele falhar por inteiro, cai para um aluno por vez
+  // para saber exatamente quem não foi.
+  let r = null;
   try {
-    const r = await nuvem.enviarNotasSided({
-      avaliacaoSicep: { ...av, sided_avaliacao_id: av.sided_avaliacao_id || apl.sided_avaliacao_id },
-      turma: turma(turmaId),
-      turmaDisciplinaId: apl.turma_disciplina_id,
-      professorId: apl.professor_id,
-      trimestre: Number(trimestre) || 1,
-      items: lista.map((x) => ({ aluno_id: x.aluno_id, nota: x.nota, situacao: x.situacao })),
-    });
+    r = await nuvem.enviarNotasSided({ ...base(), items: lista.map(itemDe) });
+  } catch (e) {
+    r = null;
+  }
 
+  if (r) {
+    ultimoSided = r.sided_avaliacao_id;
+    const ok = new Set(r.enviadosAlunos);
+    lista.forEach((x) => {
+      if (ok.has(x.aluno_id)) enviadosIds.push(x.id);
+      else if (r.conflitos.includes(x.aluno_id)) falhas.push({ resultado_id: x.id, aluno_id: x.aluno_id, erro: MSG_CONFLITO });
+      else falhas.push({ resultado_id: x.id, aluno_id: x.aluno_id, erro: 'Não foi gravada no SIDED+.' });
+    });
+  } else {
+    for (const x of lista) {
+      try {
+        const um = await nuvem.enviarNotasSided({
+          ...base(),
+          avaliacaoSicep: { ...base().avaliacaoSicep, sided_avaliacao_id: ultimoSided || base().avaliacaoSicep.sided_avaliacao_id },
+          items: [itemDe(x)],
+        });
+        ultimoSided = um.sided_avaliacao_id;
+        if (um.enviadosAlunos.includes(x.aluno_id)) enviadosIds.push(x.id);
+        else falhas.push({ resultado_id: x.id, aluno_id: x.aluno_id, erro: um.conflitos.includes(x.aluno_id) ? MSG_CONFLITO : 'Não foi gravada no SIDED+.' });
+      } catch (e) {
+        falhas.push({ resultado_id: x.id, aluno_id: x.aluno_id, erro: e.message || 'Falha ao enviar.' });
+        if (!navigator.onLine) {
+          // Sem internet: não adianta tentar os demais um a um.
+          lista.slice(lista.indexOf(x) + 1).forEach((y) => falhas.push({ resultado_id: y.id, aluno_id: y.aluno_id, erro: 'Sem conexão.' }));
+          break;
+        }
+      }
+    }
+  }
+
+  let aviso = null;
+  if (enviadosIds.length) {
     const agora = new Date().toISOString();
-    lista.forEach((x) => { x.enviado_em = agora; });
+    const enviados = lista.filter((x) => enviadosIds.includes(x.id));
+    enviados.forEach((x) => { x.enviado_em = agora; });
     if (recursos.enviado) {
       try {
-        await nuvem.api(`sicep_resultados?id=in.(${lista.map((x) => x.id).join(',')})`, {
+        await nuvem.api(`sicep_resultados?id=in.(${enviadosIds.join(',')})`, {
           method: 'PATCH',
           body: JSON.stringify({ enviado_sided_em: agora }),
         });
       } catch (e) {
         console.warn('[SICEP+] enviado_sided_em:', e.message);
+        aviso = 'As notas foram gravadas no SIDED+, mas não consegui registrar o envio no SICEP+. Ao recarregar elas podem voltar como pendentes; reenviar é seguro (não duplica).';
       }
+    } else {
+      aviso = 'As notas foram gravadas no SIDED+, mas o banco ainda não tem a coluna enviado_sided_em: o estado de envio não fica salvo depois de recarregar.';
     }
-
-    apl.sided_avaliacao_id = r.sided_avaliacao_id;
+    apl.sided_avaliacao_id = ultimoSided;
     const alvoAv = db.avaliacoes.find((x) => x.id === av.id);
     // Instrumento com várias turmas tem UMA avaliação por turma no SIDED+.
     // Um id único no instrumento apontaria todas as turmas para a mesma avaliação.
-    if (alvoAv && (alvoAv.turmas_ids || []).length <= 1) alvoAv.sided_avaliacao_id = r.sided_avaliacao_id;
-
-    return { ok: true, enviados: r.enviados, criada: !!r.criada };
-  } catch (e) {
-    return { ok: false, erro: e.message };
+    if (alvoAv && (alvoAv.turmas_ids || []).length <= 1) alvoAv.sided_avaliacao_id = ultimoSided;
   }
+
+  return { ok: falhas.length === 0, enviados: enviadosIds.length, falhas, aviso };
 }
 
 /* ---------------- Sincronização ---------------- */
