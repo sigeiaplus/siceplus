@@ -108,7 +108,7 @@ export default function leitura(params) {
         <span class="cf-sub" data-cf-sub></span>
       </div>
       <div class="cf-alvo" data-cf-alvo>
-        <span class="c tl"></span><span class="c tr"></span><span class="c bl"></span><span class="c br"></span>
+        <span class="c tl"></span><span class="c tr"></span><span class="c bl"></span><span class="c br"></span><!-- só no passo do QR; no cartão o CSS os esconde -->
       </div>
       <div class="cf-status" data-cf-status></div>
       <button class="cf-refazer" type="button" data-cf-refazer hidden>${icon('camera', 16)} Refazer</button>

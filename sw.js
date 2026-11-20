@@ -1,7 +1,7 @@
 /* SICEP+ · Service Worker (app shell) */
 
 // Suba o número a cada entrega que mude arquivos do app (força o aparelho a baixar tudo de novo).
-const CACHE = 'sicep-v18';
+const CACHE = 'sicep-v19';
 
 // O OpenCV (~13 MB) fica em cache próprio e com versão própria: subir o CACHE acima
 // NÃO apaga o OpenCV, então ninguém baixa 13 MB de novo a cada atualização do app.
@@ -25,7 +25,6 @@ const SHELL = [
   './js/nuvem.js',
   './js/lib/qrcode.js',
   './js/leitor/geometria.js',
-  './js/leitor/geometria-v3.js',
   './js/leitor/moldura.js',
   './js/leitor/opencv-loader.js',
   './js/leitor/leitor.js',

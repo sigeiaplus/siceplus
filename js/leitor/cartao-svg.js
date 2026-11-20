@@ -6,6 +6,9 @@
    fonte usada pelo leitor (leitor.js). O cabeçalho e o rodapé são apenas
    desenho: não deslocam a grade.
 
+   Layout v5 (compacto, paisagem): faixa lateral com a numeração, bolinhas
+   vazias alinhadas, A B C D no cabeçalho de cada coluna, linhas pontilhadas
+   entre as questões e QR Code no rodapé.
    O cartão não exibe a marca SICEP+: só escola, aluno, turma, avaliação
    e o caderno. Os 4 quadrados pretos e o QR Code são obrigatórios.
    ============================================================ */
@@ -15,7 +18,8 @@ import { FOLHA, MARCADOR, QR, REGIAO, GEOMETRIA_VERSAO, layoutCartao } from './g
 const TINTA = '#101318';
 const CINZA = '#5A6272';
 const LINHA = '#8E96A4';
-const TRACEJADO = '#D3D8E0';
+const TRACEJADO = '#8C8C8C';
+const FAIXA_CINZA = '#D2D2D2';
 const FONTE = "font-family=\"Arial, Helvetica, sans-serif\"";
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
@@ -72,65 +76,72 @@ export function montarCartaoSvg(d) {
     [recuo, H - recuo - lado], [W - recuo - lado, H - recuo - lado],
   ].map(([x, y]) => `<rect x="${x}" y="${y}" width="${lado}" height="${lado}" fill="${TINTA}"/>`).join('');
 
-  /* ---------- Cabeçalho (não entra na grade: a grade vem de layoutCartao) ---------- */
-  const X = 12, WCAB = 124;
+  /* ---------- Identificação (não entra na grade: a grade vem de layoutCartao) ---------- */
+  const X = 12, XF = W - 12, WCAB = XF - X;
   const cab = `
-    <line x1="${X}" y1="12.6" x2="${W - X}" y2="12.6" stroke="${TINTA}" stroke-width="0.45"/>
-    ${campo(X, 17.4, WCAB, 'ESCOLA', d.escola)}
-    ${campo(X, 25.4, WCAB, 'ALUNO(A)', '', { corpo: 3.6 })}
-    ${campo(X, 33.4, 36, 'TURMA', d.turma)}
-    ${campo(X + 42, 33.4, 38, 'MATRÍCULA', '')}
-    ${campo(X + 86, 33.4, 38, 'DATA', d.data)}
-    ${campo(X, 41.4, WCAB, 'AVALIAÇÃO', d.avaliacao)}
-    ${campo(X, 49.4, 62, 'DISCIPLINA', d.disciplina)}
-    ${campo(X + 70, 49.4, 50, 'PROFESSOR(A)', d.professor || '')}
-    <line x1="${X}" y1="57.6" x2="${W - X}" y2="57.6" stroke="${LINHA}" stroke-width="0.25"/>
-    <g>
-      <rect x="140" y="47.8" width="32" height="9.2" rx="0.8" fill="none" stroke="${TINTA}" stroke-width="0.3"/>
-      <text x="142" y="50.6" font-size="1.8" letter-spacing="0.12" fill="${CINZA}" ${FONTE}>CADERNO</text>
-      <text x="156" y="55.6" font-size="5" font-weight="700" text-anchor="middle" fill="${TINTA}" ${FONTE}>${esc(String(d.caderno || 'A').slice(0, 2))}</text>
-    </g>`;
+    ${campo(X, 16, 88, 'ALUNO(A)', '', { corpo: 3.4 })}
+    ${campo(X + 92, 16, 32, 'TURMA', d.turma)}
+    ${campo(X + 128, 16, WCAB - 128, 'DATA', d.data)}
+    ${campo(X, 24.2, 58, 'AVALIAÇÃO', d.avaliacao)}
+    ${campo(X + 62, 24.2, 40, 'DISCIPLINA', d.disciplina)}
+    ${campo(X + 106, 24.2, WCAB - 106, 'ESCOLA', d.escola)}
+    <line x1="${X}" y1="30.4" x2="${XF}" y2="30.4" stroke="${TINTA}" stroke-width="0.35"/>`;
 
   const qr = d.qr ? qrModulos(d.qr) : '';
 
-  /* ---------- Cabeçalho de cada coluna + separadores ---------- */
-  const rotuloColuna = (faixa) => {
-    if (faixa.primeira == null) return '';
-    const ini = String(faixa.primeira).padStart(2, '0');
-    const fim = String(faixa.ultima).padStart(2, '0');
-    const cx = faixa.x + (faixa.largura - 2.5) / 2;
-    return `<text x="${f(cx)}" y="${REGIAO.y0 - 1.8}" font-size="1.9" letter-spacing="0.12" text-anchor="middle" fill="${CINZA}" ${FONTE}>${ini}–${fim}</text>`;
-  };
+  /* ---------- Colunas: A B C D no topo, faixa de numeração, linhas pontilhadas ---------- */
+  const yTopo = REGIAO.y0;
+  const corpoLetraTopo = 3.1;
+  const topoColuna = (faixa) => faixa.letras.map((l) => `
+    <text x="${f(l.x)}" y="${f(yTopo - 1.7)}" font-size="${corpoLetraTopo}" font-weight="700" text-anchor="middle" fill="${CINZA}" ${FONTE}>${esc(l.alt)}</text>`).join('');
 
-  const separadores = L.faixas.slice(1).map((faixa) => {
-    const x = faixa.x - 1.25;
-    return `<line x1="${f(x)}" y1="${REGIAO.y0 - 0.5}" x2="${f(x)}" y2="${REGIAO.y1 - 2}" stroke="${TRACEJADO}" stroke-width="0.2" stroke-dasharray="1.6 1.6"/>`;
+  const tracejado = `stroke="${TRACEJADO}" stroke-width="0.18" stroke-dasharray="0.9 0.8"`;
+  const moldurasColuna = L.faixas.map((faixa) => {
+    const yFim = yTopo + faixa.linhas * L.alturaLinha;
+    const xFim = faixa.x + faixa.largura;
+    let s = `<path d="M${f(faixa.x)} ${f(yTopo)}H${f(xFim)}V${f(yFim)}H${f(faixa.x)}" fill="none" ${tracejado}/>`;
+    for (let i = 1; i < faixa.linhas; i++) {
+      const y = yTopo + i * L.alturaLinha;
+      s += `<line x1="${f(faixa.x)}" y1="${f(y)}" x2="${f(xFim)}" y2="${f(y)}" ${tracejado}/>`;
+    }
+    return s;
   }).join('');
 
-  const numeros = L.numeros.map((n) => `
-    <text x="${f(n.x + n.w - 0.8)}" y="${f(n.y + 1)}" font-size="3" font-weight="700" text-anchor="end" fill="${n.anulada ? '#888' : TINTA}" ${FONTE}>${String(n.numero).padStart(2, '0')}</text>`).join('');
+  // Faixa lateral: número par em cinza, ímpar em branco (como no modelo de referência).
+  const numeros = L.numeros.map((n) => {
+    const cinza = n.numero % 2 === 0;
+    return `
+    <rect x="${f(n.x)}" y="${f(n.y - n.h / 2)}" width="${f(n.w)}" height="${f(n.h)}" fill="${cinza ? FAIXA_CINZA : '#fff'}" stroke="${LINHA}" stroke-width="0.2"/>
+    <text x="${f(n.x + n.w / 2)}" y="${f(n.y + 1.05)}" font-size="3.1" font-weight="700" text-anchor="middle" fill="${n.anulada ? '#888' : '#3E4350'}" ${FONTE}>${String(n.numero).padStart(2, '0')}</text>`;
+  }).join('');
 
-  const corpoLetra = Math.max(1.6, L.diametro * 0.42);
+  // Bolinhas VAZIAS (sem letra dentro): a letra fica só no cabeçalho da coluna.
   const bolhas = L.bolhas.map((b) => `
-    <circle cx="${f(b.x)}" cy="${f(b.y)}" r="${f(b.d / 2)}" fill="none" stroke="${TINTA}" stroke-width="0.26"/>
-    <text x="${f(b.x)}" y="${f(b.y + corpoLetra * 0.35)}" font-size="${f(corpoLetra)}" text-anchor="middle" fill="#6A7280" ${FONTE}>${esc(b.alt)}</text>`).join('');
+    <circle cx="${f(b.x)}" cy="${f(b.y)}" r="${f(b.d / 2)}" fill="none" stroke="${TINTA}" stroke-width="0.3"/>`).join('');
 
   const anuladas = L.numeros.filter((n) => n.anulada).map((n) => `
-    <text x="${f(n.x + n.w + 3.4)}" y="${f(n.y + 1)}" font-size="2.2" fill="#8A9099" ${FONTE}>ANULADA</text>`).join('');
+    <text x="${f(n.x + n.w + 3)}" y="${f(n.y + 0.8)}" font-size="2.2" fill="#8A9099" ${FONTE}>ANULADA</text>`).join('');
 
-  /* ---------- Rodapé ---------- */
+  /* ---------- Rodapé: instruções, caderno e QR Code ---------- */
+  const yR = REGIAO.y1;
   const rodape = `
-    <line x1="${X}" y1="${REGIAO.y1 + 1.5}" x2="${W - X}" y2="${REGIAO.y1 + 1.5}" stroke="${LINHA}" stroke-width="0.25"/>
-    <text x="${W / 2}" y="${REGIAO.y1 + 6}" font-size="2.3" text-anchor="middle" fill="${CINZA}" ${FONTE}>Preencha UMA única alternativa por questão, cobrindo toda a bolinha, com caneta preta ou azul.</text>
-    <text x="${W / 2}" y="${REGIAO.y1 + 9.6}" font-size="2.1" text-anchor="middle" fill="${CINZA}" ${FONTE}>Não rasure nem use corretivo. Questões em branco contam como erro.</text>
-    <text x="${X}" y="${REGIAO.y1 + 14}" font-size="1.9" fill="#8A9099" ${FONTE}>Layout v${GEOMETRIA_VERSAO} · ${L.numeros.length} questões · ${d.letras.length} alternativas</text>
-    <text x="${W - X}" y="${REGIAO.y1 + 14}" font-size="1.9" text-anchor="end" fill="#8A9099" ${FONTE}>${esc(codigoRotulo(d.codigo))}</text>`;
+    <line x1="${X}" y1="${yR + 1.6}" x2="${XF}" y2="${yR + 1.6}" stroke="${LINHA}" stroke-width="0.25"/>
+    <text x="${X}" y="${yR + 6.2}" font-size="2.2" fill="${CINZA}" ${FONTE}>Preencha UMA única alternativa por questão,</text>
+    <text x="${X}" y="${yR + 9.6}" font-size="2.2" fill="${CINZA}" ${FONTE}>cobrindo toda a bolinha, com caneta preta ou azul.</text>
+    <text x="${X}" y="${yR + 13}" font-size="2.2" fill="${CINZA}" ${FONTE}>Não rasure nem use corretivo. Em branco conta como erro.</text>
+    <g>
+      <rect x="112" y="${yR + 4}" width="26" height="11" rx="0.8" fill="none" stroke="${TINTA}" stroke-width="0.3"/>
+      <text x="114" y="${yR + 6.9}" font-size="1.8" letter-spacing="0.12" fill="${CINZA}" ${FONTE}>CADERNO</text>
+      <text x="125" y="${yR + 13.2}" font-size="5.2" font-weight="700" text-anchor="middle" fill="${TINTA}" ${FONTE}>${esc(String(d.caderno || 'A').slice(0, 2))}</text>
+    </g>
+    <text x="${X}" y="${yR + 20.2}" font-size="1.9" fill="#8A9099" ${FONTE}>${esc(codigoRotulo(d.codigo))}</text>
+    <text x="${X}" y="${yR + 23.4}" font-size="1.9" fill="#8A9099" ${FONTE}>Layout v${GEOMETRIA_VERSAO} · ${L.numeros.length} questões · ${d.letras.length} alternativas</text>`;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}mm" height="${H}mm" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Cartão de respostas">
   <rect width="${W}" height="${H}" fill="#fff"/>
   ${marcadores}${cab}${qr}
-  ${L.faixas.map(rotuloColuna).join('')}
-  ${separadores}${numeros}${bolhas}${anuladas}${rodape}
+  ${L.faixas.map(topoColuna).join('')}
+  ${moldurasColuna}${numeros}${bolhas}${anuladas}${rodape}
 </svg>`;
 }
 

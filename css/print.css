@@ -1,7 +1,7 @@
 /* ============================================================
    SICEP+ · Impressão dos cartões de respostas
    ------------------------------------------------------------
-   A folha é um SVG de 186 × 273 mm (geometria.js). Na impressão
+   A folha é um SVG de 186 × 135 mm (geometria.js). Na impressão
    ela sai em tamanho real, sem escala: margem da página = 0 e a
    folha centralizada, para os marcadores ficarem a 7 mm exatos.
    ============================================================ */
@@ -33,7 +33,7 @@
   .sheet {
     width: 186mm;
     max-width: 186mm;
-    height: 273mm;
+    height: 135mm;
     aspect-ratio: auto;
     margin: 8mm auto 0;
     border: 0;
@@ -45,5 +45,5 @@
     print-color-adjust: exact;
   }
 
-  .sheet svg { width: 186mm; height: 273mm; }
+  .sheet svg { width: 186mm; height: 135mm; }
 }

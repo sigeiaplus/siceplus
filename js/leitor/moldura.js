@@ -9,7 +9,9 @@
  * (instrução, status, zoom) e a barra de botões, sempre centrada nesse espaço.
  */
 
-export const PROPORCAO_CARTAO = 186 / 273;   // 0,681: largura / altura do cartão impresso
+import { FOLHA } from './geometria.js';
+
+export const PROPORCAO_CARTAO = FOLHA.largura / FOLHA.altura;   // 1,378: largura / altura do cartão impresso (paisagem)
 const MARGEM = 0.94;                         // fração do espaço livre que a moldura pode ocupar
 const FOLGA = 8;                             // respiro entre a moldura e os controles (px)
 const ESPACO_MINIMO = 170;                   // abaixo disso a moldura usa a imagem inteira
