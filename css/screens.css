@@ -518,12 +518,12 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 
 @media (min-width: 860px) {
   .res-lista-topo {
-    display: grid; grid-template-columns: 28px minmax(0, 1.7fr) 132px 250px;
+    display: grid; grid-template-columns: 28px minmax(0, 1.7fr) 150px;
     gap: 10px; align-items: center; padding: 9px 12px;
     background: var(--bg); border-bottom: 1px solid var(--line);
     font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3);
   }
-  .res-row { grid-template-columns: 28px minmax(0, 1.7fr) 132px 250px; align-items: center; }
+  .res-row { grid-template-columns: 28px minmax(0, 1.7fr) 150px; align-items: center; }
   .res-nota { grid-column: auto; text-align: right; align-items: flex-end; }
   .res-acts { grid-column: auto; justify-content: flex-end; flex-wrap: nowrap; }
   .res-col-nota, .res-col-acoes { text-align: right; }

@@ -14,6 +14,10 @@ import {
  * - Reler volta ao fluxo da câmera (QR do caderno → cartão) sem duplicar registro.
  * - Excluir pede confirmação e não apaga a nota já lançada no SIDED+.
  */
+// Avaliação e turma escolhidas valem enquanto o app estiver aberto (sobrevivem a ir e voltar da
+// releitura). Recarregar a página é sessão nova e pergunta de novo; "Redefinir filtro" também.
+let escolhaSessao = null;   // { avaliacaoId, turmaId: 'todas' | id }
+
 export default function resultados() {
   const root = el('<div class="res-root"></div>');
 
@@ -21,8 +25,9 @@ export default function resultados() {
 
   const st = {
     filtro: 'todos',
-    avFiltro: 'todas',
-    turmaFiltro: 'todas',
+    avFiltro: escolhaSessao?.avaliacaoId || null,   // null = ainda não escolheu
+    turmaFiltro: escolhaSessao?.turmaId || 'todas',
+    rascunho: { avaliacaoId: '', turmaId: 'todas' },
     busca: '',
     sel: new Set(),
   };
@@ -35,7 +40,7 @@ export default function resultados() {
       if (st.filtro === 'confirmados' && !confirmado(r)) return false;
       if (st.filtro === 'revisao' && confirmado(r)) return false;
       if (st.filtro === 'enviados' && !r.enviado_em) return false;
-      if (st.avFiltro !== 'todas' && r.avaliacao_id !== st.avFiltro) return false;
+      if (r.avaliacao_id !== st.avFiltro) return false;
       if (st.turmaFiltro !== 'todas' && r.turma_id !== st.turmaFiltro) return false;
       if (termo) {
         const aluno = store.aluno(r.aluno_id);
@@ -69,7 +74,6 @@ export default function resultados() {
 
         <div class="res-aluno">
           <span class="res-nome"><span class="avatar sm">${esc(iniciais(nome))}</span>${esc(nome)}</span>
-          <span class="res-meta">${esc(av?.titulo || '—')}</span>
           <span class="res-meta">${esc([turma?.nome, disc?.nome, fmtData(r.criado_em)].filter(Boolean).join(' · '))}</span>
           <span class="res-badges">
             ${ok ? badge('Revisado', 'ok') : badge('A confirmar', 'warn')}
@@ -84,17 +88,6 @@ export default function resultados() {
           <span class="xs muted res-perc">${r.percentual == null ? '' : desempenhoTexto(r.percentual, faixa)}</span>
         </div>
 
-        <div class="res-acts">
-          <button class="btn ${ok ? 'btn-outline' : 'btn-primary'} btn-sm" type="button" data-revisar="${esc(r.id)}" aria-label="Revisar o resultado de ${esc(nome)}">
-            ${icon('check', 14)} Revisar
-          </button>
-          <button class="btn btn-outline btn-sm" type="button" data-reler="${esc(r.id)}" title="Ler o cartão deste aluno novamente" aria-label="Reler o cartão de ${esc(nome)}">
-            ${icon('camera', 14)} Reler
-          </button>
-          <button class="btn btn-ghost btn-sm" type="button" data-excluir="${esc(r.id)}" aria-label="Excluir resultado de ${esc(nome)}">
-            ${icon('trash', 14)} Excluir
-          </button>
-        </div>
       </div>`;
   }
 
@@ -203,47 +196,183 @@ export default function resultados() {
     desenhar();
   }
 
-  /* ---------------- Render ---------------- */
+  /* ---------------- Ações da seleção (mini card inferior) ---------------- */
 
-  function pintar() {
-    const resumo = store.resumo();
-    const lista = visiveis();
-    // Só descarta da seleção o que deixou de existir (exclusão/recarregamento).
-    [...st.sel].forEach((id) => { if (!store.resultados().some((r) => r.id === id)) st.sel.delete(id); });
+  function desenharAcoes() {
+    const alvo = root.querySelector('[data-acoes-wrap]');
+    if (!alvo) return;
+    const n = st.sel.size;
+    if (!n) { alvo.innerHTML = ''; return; }
+    const um = n === 1;
+    alvo.innerHTML = `
+      <div class="res-enviar on" role="region" aria-label="Ações para os alunos selecionados">
+        <div class="re-txt">
+          <strong>${n} selecionado${n === 1 ? '' : 's'}</strong>
+          <span class="xs muted">${um ? 'Escolha o que fazer com este resultado.' : 'RELER vale para um aluno por vez.'}</span>
+        </div>
+        <div class="row wrap" style="gap:8px">
+          <button class="btn btn-primary btn-sm" type="button" data-acao-revisar>${icon('check', 14)} REVISAR</button>
+          <button class="btn btn-outline btn-sm" type="button" data-acao-reler ${um ? '' : 'disabled'}>${icon('camera', 14)} RELER</button>
+          <button class="btn btn-outline btn-sm" type="button" data-acao-excluir>${icon('trash', 14)} EXCLUIR</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-acao-limpar>Limpar</button>
+        </div>
+      </div>`;
 
-    const todosMarcados = lista.length > 0 && lista.every((r) => st.sel.has(r.id));
+    alvo.querySelector('[data-acao-revisar]').addEventListener('click', () => abrirRevisao([...st.sel]));
+    alvo.querySelector('[data-acao-limpar]').addEventListener('click', () => { st.sel.clear(); pintar(); });
+
+    alvo.querySelector('[data-acao-reler]').addEventListener('click', () => {
+      const r = store.resultados().find((x) => x.id === [...st.sel][0]);
+      if (!r) return;
+      if (r.enviado_em && !window.confirm(
+        'Esta nota já foi enviada ao SIDED+.\n\nA nova leitura altera só o resultado no SICEP+; a nota no SIDED+ não será modificada.\n\nReler o cartão?'
+      )) return;
+      location.hash = `#/leitura/${r.avaliacao_id}/${r.aluno_id}`;
+    });
+
+    alvo.querySelector('[data-acao-excluir]').addEventListener('click', async (ev) => {
+      const alvos = store.resultados().filter((r) => st.sel.has(r.id));
+      if (!alvos.length) return;
+      const enviadas = alvos.filter((r) => r.enviado_em).length;
+      const nomes = alvos.slice(0, 5).map((r) => `• ${store.aluno(r.aluno_id)?.nome_completo || '—'}`).join('\n')
+        + (alvos.length > 5 ? `\n• e mais ${alvos.length - 5}` : '');
+      const aviso = [
+        alvos.length === 1 ? 'Excluir este resultado?' : `Excluir ${alvos.length} resultados?`,
+        '',
+        nomes,
+        '',
+        enviadas
+          ? `${enviadas === alvos.length ? 'Estas notas já foram' : `${enviadas} já foram`} enviada(s) ao SIDED+. A exclusão aqui NÃO apaga a nota lançada lá.`
+          : 'Os cartões precisarão ser lidos novamente para gerar outras notas.',
+        'Não há como desfazer.',
+      ].join('\n');
+      if (!window.confirm(aviso)) return;
+
+      ev.currentTarget.disabled = true;
+      let feitos = 0;
+      const erros = [];
+      for (const r of alvos) {
+        const res = await store.excluirResultado(r.id);
+        if (res.ok) { feitos += 1; st.sel.delete(r.id); } else erros.push(res.erro);
+      }
+      pintar();
+      if (erros.length) toast(`${feitos} excluído(s). Falhou em ${erros.length}: ${erros[0]}`, 'err');
+      else toast(feitos === 1 ? 'Resultado excluído.' : `${feitos} resultados excluídos.`, 'ok');
+    });
+  }
+
+  /* ---------------- Escolha inicial: avaliação e turma ---------------- */
+
+  function pintarEscolha() {
     const avs = store.avaliacoes();
-    const turmas = store.turmasDoProfessor(store.sessao()?.professor_id).slice()
+    const av = avs.find((a) => a.id === st.rascunho.avaliacaoId) || null;
+    const turmasDaAv = (av?.aplicacoes || [])
+      .map((a) => store.turma(a.turma_id)).filter(Boolean)
       .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
 
     root.innerHTML = `
       <div class="page-head res-head-page">
         <span class="eyebrow">Resultados</span>
         <h1>Notas e desempenho</h1>
-        <p>Revise, releia ou exclua cada resultado. O envio ao SIDED+ é feito na tela da <a href="#/avaliacoes">Avaliação</a>.</p>
+        <p>Escolha a avaliação e a turma para ver os resultados.</p>
+      </div>
+
+      ${avs.length ? `
+        <div class="card stack">
+          <div class="field" style="margin:0">
+            <label class="label" for="e-av">Avaliação</label>
+            <select id="e-av" class="select" data-e-av>
+              <option value="">Selecione a avaliação</option>
+              ${avs.map((a) => `<option value="${esc(a.id)}" ${a.id === st.rascunho.avaliacaoId ? 'selected' : ''}>${esc(a.titulo)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" style="margin:0">
+            <label class="label" for="e-turma">Turma</label>
+            <select id="e-turma" class="select" data-e-turma ${av ? '' : 'disabled'}>
+              <option value="todas">Todas as turmas</option>
+              ${turmasDaAv.map((t) => `<option value="${esc(t.id)}" ${t.id === st.rascunho.turmaId ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}
+            </select>
+          </div>
+          <button class="btn btn-primary" type="button" data-ver ${av ? '' : 'disabled'}>Ver resultados</button>
+        </div>` : `
+        <div class="empty">
+          <div class="ei">${icon('chart', 20)}</div>
+          <h3>Sem avaliações</h3>
+          <p>Crie uma avaliação e corrija os cartões para gerar as notas.</p>
+          <a class="btn btn-primary" href="#/avaliacoes/nova">Nova avaliação</a>
+        </div>`}
+    `;
+
+    root.querySelector('[data-e-av]')?.addEventListener('change', (e) => {
+      st.rascunho.avaliacaoId = e.target.value;
+      st.rascunho.turmaId = 'todas';
+      pintarEscolha();
+    });
+    root.querySelector('[data-e-turma]')?.addEventListener('change', (e) => { st.rascunho.turmaId = e.target.value; });
+    root.querySelector('[data-ver]')?.addEventListener('click', () => {
+      if (!st.rascunho.avaliacaoId) return;
+      st.avFiltro = st.rascunho.avaliacaoId;
+      st.turmaFiltro = st.rascunho.turmaId;
+      escolhaSessao = { avaliacaoId: st.avFiltro, turmaId: st.turmaFiltro };
+      st.sel.clear();
+      pintar();
+    });
+  }
+
+  function redefinirFiltro() {
+    escolhaSessao = null;
+    st.avFiltro = null;
+    st.turmaFiltro = 'todas';
+    st.rascunho = { avaliacaoId: '', turmaId: 'todas' };
+    st.filtro = 'todos';
+    st.busca = '';
+    st.sel.clear();
+    pintar();
+  }
+
+  /* ---------------- Render ---------------- */
+
+  function pintar() {
+    // Avaliação escolhida que deixou de existir (excluída): pergunta de novo.
+    if (st.avFiltro && !store.avaliacao(st.avFiltro)) { escolhaSessao = null; st.avFiltro = null; }
+    if (!st.avFiltro) { pintarEscolha(); return; }
+
+    const av = store.avaliacao(st.avFiltro);
+    const turmaSel = st.turmaFiltro !== 'todas' ? store.turma(st.turmaFiltro) : null;
+    const escopo = store.resultados().filter((r) =>
+      r.avaliacao_id === st.avFiltro && (st.turmaFiltro === 'todas' || r.turma_id === st.turmaFiltro));
+    const conf = escopo.filter((r) => confirmado(r) && r.nota != null && r.situacao === 'normal');
+    const media = conf.length ? conf.reduce((t, r) => t + Number(r.nota || 0), 0) / conf.length : 0;
+    const pendentesEscopo = escopo.filter((r) => !confirmado(r)).length;
+
+    const lista = visiveis();
+    // Só descarta da seleção o que deixou de existir (exclusão/recarregamento).
+    [...st.sel].forEach((id) => { if (!store.resultados().some((r) => r.id === id)) st.sel.delete(id); });
+    const todosMarcados = lista.length > 0 && lista.every((r) => st.sel.has(r.id));
+    const filtrado = st.busca || st.filtro !== 'todos';
+
+    root.innerHTML = `
+      <div class="page-head res-head-page">
+        <span class="eyebrow">Resultados</span>
+        <h1>Notas e desempenho</h1>
+        <p>Selecione os alunos para revisar, reler ou excluir. O envio ao SIDED+ é feito na tela da <a href="#/avaliacoes">Avaliação</a>.</p>
+      </div>
+
+      <div class="card row between wrap" style="gap:10px;align-items:center">
+        <div class="grow" style="min-width:0">
+          <strong>${esc(av.titulo)}</strong>
+          <span class="xs muted" style="display:block">${esc(turmaSel ? turmaSel.nome : 'Todas as turmas')}</span>
+        </div>
+        <button class="btn btn-outline btn-sm" type="button" data-redefinir>Redefinir filtro</button>
       </div>
 
       <div class="res-kpis">
-        <div class="kpi"><div class="kv">${fmtNota(resumo.media)}</div><div class="kl">Média revisada</div></div>
-        <div class="kpi"><div class="kv">${resumo.confirmados}</div><div class="kl">Revisadas</div></div>
-        <div class="kpi"><div class="kv">${resumo.pendentes}</div><div class="kl">A revisar</div></div>
+        <div class="kpi"><div class="kv">${fmtNota(media)}</div><div class="kl">Média revisada</div></div>
+        <div class="kpi"><div class="kv">${conf.length}</div><div class="kl">Revisadas</div></div>
+        <div class="kpi"><div class="kv">${pendentesEscopo}</div><div class="kl">A revisar</div></div>
       </div>
 
       <div class="card res-filtros">
-        <div class="field" style="margin:0">
-          <label class="label" for="f-av">Avaliação</label>
-          <select id="f-av" class="select" data-av>
-            <option value="todas">Todas as avaliações</option>
-            ${avs.map((a) => `<option value="${esc(a.id)}" ${a.id === st.avFiltro ? 'selected' : ''}>${esc(a.titulo)}</option>`).join('')}
-          </select>
-        </div>
-        <div class="field" style="margin:0">
-          <label class="label" for="f-turma">Turma</label>
-          <select id="f-turma" class="select" data-turma>
-            <option value="todas">Todas as turmas</option>
-            ${turmas.map((t) => `<option value="${esc(t.id)}" ${t.id === st.turmaFiltro ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}
-          </select>
-        </div>
         <div class="field" style="margin:0">
           <label class="label" for="f-busca">Buscar aluno</label>
           <div class="search-box">
@@ -264,10 +393,6 @@ export default function resultados() {
           <button class="btn btn-ghost btn-sm" type="button" data-marcar ${lista.length ? '' : 'disabled'}>
             ${todosMarcados ? 'Desmarcar' : 'Selecionar'} ${lista.length} visível(is)
           </button>
-          ${st.sel.size ? `<button class="btn btn-ghost btn-sm" type="button" data-limpar>Limpar seleção (${st.sel.size})</button>` : ''}
-          <button class="btn btn-outline btn-sm" type="button" data-revisar-sel ${st.sel.size ? '' : 'disabled'}>
-            ${icon('check', 14)} Revisar selecionados
-          </button>
         </div>
       </div>
 
@@ -277,39 +402,24 @@ export default function resultados() {
             <label class="res-check">
               <input type="checkbox" data-sel-todos ${todosMarcados ? 'checked' : ''} aria-label="Selecionar todos os resultados visíveis" />
             </label>
-            <span>Aluno · avaliação</span>
+            <span>Aluno</span>
             <span class="res-col-nota">Nota</span>
-            <span class="res-col-acoes">Ações</span>
           </div>
           <div class="res-linhas">${lista.map(linhaHTML).join('')}</div>
         </div>` : `
         <div class="empty">
           <div class="ei">${icon('chart', 20)}</div>
-          <h3>${st.busca || st.avFiltro !== 'todas' || st.turmaFiltro !== 'todas' || st.filtro !== 'todos'
-            ? 'Nenhum resultado neste filtro'
-            : 'Sem resultados'}</h3>
-          <p>${st.busca || st.avFiltro !== 'todas' || st.turmaFiltro !== 'todas' || st.filtro !== 'todos'
-            ? 'Ajuste os filtros para ver as notas.'
-            : 'Corrija os cartões para gerar as notas.'}</p>
-          <a class="btn btn-primary" href="#/leitura">Corrigir cartões</a>
+          <h3>${filtrado ? 'Nenhum resultado neste filtro' : 'Sem resultados'}</h3>
+          <p>${filtrado ? 'Ajuste os filtros para ver as notas.' : 'Nenhum cartão desta avaliação foi corrigido ainda.'}</p>
+          ${filtrado ? '' : '<a class="btn btn-primary" href="#/leitura">Corrigir cartões</a>'}
         </div>`}
 
-      <div class="alert y">
-        ${icon('info', 16)}
-        <span>Para enviar notas ao SIDED+, abra a avaliação em <a href="#/avaliacoes">Avaliações</a>. Só entram as notas revisadas e confirmadas que ainda não foram enviadas.</span>
-      </div>
+      <div data-acoes-wrap></div>
     `;
 
     /* ---- eventos ---- */
 
-    root.querySelector('[data-av]').addEventListener('change', (e) => {
-      st.avFiltro = e.target.value;
-      pintar();
-    });
-    root.querySelector('[data-turma]').addEventListener('change', (e) => {
-      st.turmaFiltro = e.target.value;
-      pintar();
-    });
+    root.querySelector('[data-redefinir]').addEventListener('click', redefinirFiltro);
 
     const busca = root.querySelector('[data-busca]');
     busca.addEventListener('input', () => {
@@ -329,7 +439,6 @@ export default function resultados() {
       else lista.forEach((r) => st.sel.add(r.id));
       pintar();
     });
-    root.querySelector('[data-limpar]')?.addEventListener('click', () => { st.sel.clear(); pintar(); });
 
     root.querySelector('[data-sel-todos]')?.addEventListener('change', (e) => {
       if (e.target.checked) lista.forEach((r) => st.sel.add(r.id));
@@ -337,65 +446,29 @@ export default function resultados() {
       pintar();
     });
 
+    // Marca/desmarca sem redesenhar a lista (mantém a posição de rolagem).
+    function alternar(id, marcado) {
+      if (marcado) st.sel.add(id); else st.sel.delete(id);
+      const linha = root.querySelector(`[data-linha="${CSS.escape(id)}"]`);
+      if (linha) {
+        linha.classList.toggle('sel', marcado);
+        const c = linha.querySelector('[data-sel]');
+        if (c) c.checked = marcado;
+      }
+      desenharAcoes();
+    }
     root.querySelectorAll('[data-sel]').forEach((c) => {
-      c.addEventListener('change', () => {
-        const id = c.dataset.sel;
-        if (c.checked) st.sel.add(id); else st.sel.delete(id);
-        const linha = c.closest('.res-row');
-        if (linha) linha.classList.toggle('sel', c.checked);
-        // Só marca a linha, sem redesenhar a lista (evita perder a posição de rolagem).
-        const b = root.querySelector('[data-revisar-sel]');
-        if (b) b.disabled = st.sel.size === 0;
+      c.addEventListener('change', () => alternar(c.dataset.sel, c.checked));
+    });
+    // Tocar na linha também seleciona (mais fácil no celular).
+    root.querySelectorAll('[data-linha]').forEach((linha) => {
+      linha.addEventListener('click', (e) => {
+        if (e.target.closest('input, label, a, button')) return;
+        alternar(linha.dataset.linha, !st.sel.has(linha.dataset.linha));
       });
     });
 
-    root.querySelector('[data-revisar-sel]')?.addEventListener('click', () => abrirRevisao([...st.sel]));
-    root.querySelectorAll('[data-revisar]').forEach((b) => {
-      b.addEventListener('click', () => {
-        const id = b.dataset.revisar;
-        const r = store.resultados().find((x) => x.id === id);
-        if (r && !confirmado(r)) st.sel.add(id);
-        abrirRevisao([id]);
-      });
-    });
-
-    root.querySelectorAll('[data-reler]').forEach((b) => {
-      b.addEventListener('click', () => {
-        const r = store.resultados().find((x) => x.id === b.dataset.reler);
-        if (!r) return;
-        if (r.enviado_em && !window.confirm(
-          'Esta nota já foi enviada ao SIDED+.\n\nA nova leitura altera só o resultado no SICEP+; a nota no SIDED+ não será modificada.\n\nReler o cartão?'
-        )) return;
-        location.hash = `#/leitura/${r.avaliacao_id}/${r.aluno_id}`;
-      });
-    });
-
-    root.querySelectorAll('[data-excluir]').forEach((b) => {
-      b.addEventListener('click', async () => {
-        const id = b.dataset.excluir;
-        const r = store.resultados().find((x) => x.id === id);
-        if (!r) return;
-        const aluno = store.aluno(r.aluno_id);
-        const av = store.avaliacao(r.avaliacao_id);
-        const aviso = [
-          `Excluir o resultado de ${aluno?.nome_completo || '—'} em "${av?.titulo || '—'}"?`,
-          '',
-          r.enviado_em
-            ? 'Esta nota já foi enviada ao SIDED+. A exclusão aqui NÃO apaga a nota lançada lá.'
-            : 'O cartão precisará ser lido novamente para gerar outra nota.',
-          'Não há como desfazer.',
-        ].join('\n');
-        if (!window.confirm(aviso)) return;
-
-        b.disabled = true;
-        const res = await store.excluirResultado(id);
-        if (!res.ok) { b.disabled = false; toast(res.erro, 'err'); return; }
-        st.sel.delete(id);
-        toast(res.enviado ? 'Resultado excluído. A nota do SIDED+ foi mantida.' : 'Resultado excluído.', 'ok');
-        pintar();
-      });
-    });
-
+    desenharAcoes();
   }
 
   pintar();
