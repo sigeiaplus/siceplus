@@ -546,6 +546,9 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 .res-enviar-btn { flex: 1 1 250px; font-size: 13.5px; }
 .res-enviar-btn[disabled] { opacity: .55; cursor: not-allowed; }
 
+/* Ações da seleção: ficam no TOPO da lista, grudadas ao rolar. */
+.res-enviar.res-acoes-topo { bottom: auto; top: 8px; }
+
 /* Revisão dentro do modal */
 .res-modal { max-height: 92dvh; }
 .rev-lista { display: flex; flex-direction: column; gap: 10px; overflow: auto; margin: 0 -4px; padding: 0 4px 2px; }

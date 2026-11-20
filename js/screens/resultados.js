@@ -205,7 +205,7 @@ export default function resultados() {
     if (!n) { alvo.innerHTML = ''; return; }
     const um = n === 1;
     alvo.innerHTML = `
-      <div class="res-enviar on" role="region" aria-label="Ações para os alunos selecionados">
+      <div class="res-enviar res-acoes-topo on" role="region" aria-label="Ações para os alunos selecionados">
         <div class="re-txt">
           <strong>${n} selecionado${n === 1 ? '' : 's'}</strong>
           <span class="xs muted">${um ? 'Escolha o que fazer com este resultado.' : 'RELER vale para um aluno por vez.'}</span>
@@ -396,6 +396,8 @@ export default function resultados() {
         </div>
       </div>
 
+      <div data-acoes-wrap></div>
+
       ${lista.length ? `
         <div class="card res-lista">
           <div class="res-lista-topo">
@@ -413,8 +415,6 @@ export default function resultados() {
           <p>${filtrado ? 'Ajuste os filtros para ver as notas.' : 'Nenhum cartão desta avaliação foi corrigido ainda.'}</p>
           ${filtrado ? '' : '<a class="btn btn-primary" href="#/leitura">Corrigir cartões</a>'}
         </div>`}
-
-      <div data-acoes-wrap></div>
     `;
 
     /* ---- eventos ---- */
