@@ -798,7 +798,7 @@ export default function leitura(params) {
     ev.target.value = '';
     if (!arquivo) return;
     if (!ov.aberto) return;
-    if (ov.capturando || ov.processando) return;
+    if (ov.capturando || ov.processando || ov.escolha || ov.caderno) return;   // mesma trava do botão de captura
     ov.capturando = true;
     ov.erro = null;
     atualizarOverlay();
