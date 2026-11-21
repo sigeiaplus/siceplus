@@ -1,7 +1,7 @@
 /* SICEP+ · Service Worker (app shell) */
 
 // Suba o número a cada entrega que mude arquivos do app (força o aparelho a baixar tudo de novo).
-const CACHE = 'sicep-v21';
+const CACHE = 'sicep-v22';
 
 // O OpenCV (~13 MB) fica em cache próprio e com versão própria: subir o CACHE acima
 // NÃO apaga o OpenCV, então ninguém baixa 13 MB de novo a cada atualização do app.
@@ -22,6 +22,7 @@ const SHELL = [
   './js/ui.js',
   './js/store.js',
   './js/offline/db.js',
+  './js/offline/fila.js',
   './js/config.js',
   './js/nuvem.js',
   './js/lib/qrcode.js',
@@ -43,6 +44,7 @@ const SHELL = [
   './js/screens/cartoes.js',
   './js/screens/leitura.js',
   './js/screens/resultados.js',
+  './js/screens/fila-painel.js',
 ];
 
 self.addEventListener('install', (ev) => {

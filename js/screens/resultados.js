@@ -1,7 +1,7 @@
 import * as store from '../store.js';
 import {
   el, esc, icon, fmtNota, fmtData, iniciais,
-  toast, situacaoBadge, barraDesempenho, desempenhoTexto, badge,
+  toast, situacaoBadge, barraDesempenho, desempenhoTexto, badge, syncResultadoBadge,
 } from '../ui.js';
 
 /**
@@ -78,6 +78,7 @@ export default function resultados() {
           <span class="res-badges">
             ${ok ? badge('Revisado', 'ok') : badge('A confirmar', 'warn')}
             ${r.enviado_em ? badge('Enviado ao SIDED+', 'y') : ''}
+            ${syncResultadoBadge(r.sync)}
             ${situacaoBadge(r.situacao)}
           </span>
         </div>

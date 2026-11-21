@@ -12,6 +12,7 @@
 
 import * as nuvem from './nuvem.js';
 import * as offline from './offline/db.js';
+import * as filaSync from './offline/fila.js';
 import { configurado, CONFIG } from './config.js';
 
 export const ALTERNATIVAS = ['A', 'B', 'C', 'D', 'E'];
@@ -49,16 +50,28 @@ let recursos = { prazo: false, faixas: false, anulada: false, situacao: false, t
 let origem = 'nuvem'; // nuvem | cache — de onde vieram os dados em memória
 let cacheEm = null;   // ISO da última cópia local usada/gravada
 let motivoCache = null;
+// Fila de sincronização (6D): contagem em memória para o chip e as guardas; a verdade fica no IndexedDB.
+let contagemFila = { pendente: 0, sincronizando: 0, sincronizado: 0, erro: 0, aberto: 0, total: 0 };
+let sincronizando = false;
+const ouvintesFila = new Set();
 
 // Sessão offline: vale por este tempo a partir do login (não renova sozinha).
 // Passou disso, é preciso entrar de novo com internet.
 export const VALIDADE_SESSAO_MS = 14 * 24 * 60 * 60 * 1000;
 // Sem resposta da nuvem neste prazo, o app abre com a cópia local.
 const LIMITE_NUVEM_MS = 20000;
+// Ao salvar um resultado, espera a nuvem no máximo isto; depois segue (o envio continua em segundo plano).
+const ESPERA_MAX_SALVAR_MS = 15000;
 
 function comLimite(promessa, ms) {
   let t;
   const limite = new Promise((_, falha) => { t = setTimeout(() => falha(new Error('A nuvem demorou demais para responder.')), ms); });
+  return Promise.race([promessa, limite]).finally(() => clearTimeout(t));
+}
+
+function esperarNoMaximo(promessa, ms) {
+  let t;
+  const limite = new Promise((ok) => { t = setTimeout(ok, ms); });
   return Promise.race([promessa, limite]).finally(() => clearTimeout(t));
 }
 
@@ -165,6 +178,7 @@ export async function iniciar() {
       erro = null;
       origem = 'nuvem';
       motivoCache = null;
+      await aplicarFilaNoEstado();
       await garantirSessaoPersistida(remota);
       await gravarCacheLocal();
       return { estado, erro: null, recursos, origem };
@@ -185,6 +199,7 @@ export async function iniciar() {
     origem = 'cache';
     cacheEm = copia.atualizado_em;
     motivoCache = falhaNuvem?.message || null;
+    await aplicarFilaNoEstado();
     return { estado, erro: null, recursos, origem };
   }
 
@@ -194,6 +209,7 @@ export async function iniciar() {
     erro = null;
     origem = 'cache';
     motivoCache = falhaNuvem?.message || null;
+    await aplicarFilaNoEstado();
     return { estado, erro: null, recursos, origem };
   }
 
@@ -216,7 +232,9 @@ async function gravarCacheLocal() {
     turma_disciplinas: db.turma_disciplinas,
     alunos: db.alunos,
     avaliacoes: db.avaliacoes,
-    resultados: db.resultados,
+    // A cópia local só recebe o que o servidor já confirmou. Resultado ainda na fila
+    // (pendente/sincronizando/erro) vive na fila, não aqui — e é reaplicado ao abrir.
+    resultados: db.resultados.filter((r) => !r.sync || r.sync === 'sincronizado'),
   });
   if (ok) cacheEm = new Date().toISOString();
   return ok;
@@ -703,28 +721,10 @@ export async function salvarResultado({
   if (recursos.status || recursos.situacao) payload.status = status;
   if (recursos.revisado) payload.revisado_em = status === 'confirmado' ? new Date().toISOString() : null;
 
-  let id = existente?.id || null;
-  try {
-    if (existente) {
-      await nuvem.api(`sicep_resultados?id=eq.${existente.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
-    } else {
-      const criado = await nuvem.salvarResultado({ ...payload, id: resultadoId || nuvem.novoUuid() });
-      id = criado.id;
-    }
-    if (imagemRef) {
-      await nuvem.registrarScan({
-        resultado_id: id,
-        imagem_url: imagemRef,
-        respostas_detectadas: respostas,
-        confianca,
-      });
-    }
-  } catch (e) {
-    if (e.codigo === 'RESULTADO_DUPLICADO') {
-      return { ok: false, erro: 'Já existe um resultado deste aluno nesta avaliação (gravado em outro momento ou aparelho). Recarregue os dados para vê-lo.' };
-    }
-    return { ok: false, erro: 'Falha ao gravar na nuvem: ' + e.message };
-  }
+  // O id nasce aqui, no aparelho, e acompanha o resultado até o servidor (6C):
+  // reenviar a mesma operação atualiza a mesma linha, nunca cria outra.
+  const id = existente?.id || resultadoId || nuvem.novoUuid();
+  const usuarioId = db.sessao.usuario_id;
 
   const local = {
     id,
@@ -744,23 +744,88 @@ export async function salvarResultado({
     situacao,
     status: recursos.status || recursos.situacao ? status : 'confirmado',
     revisado_em: recursos.revisado && status === 'confirmado' ? new Date().toISOString() : null,
+    // Gravar/sincronizar nunca mexe no envio ao SIDED+: o que já foi enviado continua marcado.
     enviado_em: existente?.enviado_em || null,
     origem: 'leitura',
     criado_em: existente?.criado_em || hojeISO(),
-    registrado_por: db.sessao.usuario_id,
+    registrado_por: usuarioId,
     observacao,
   };
+  const aviso = !recursos.status && !recursos.situacao
+    ? 'Nota gravada. O campo de status de revisão ainda não existe no banco.'
+    : null;
+  const anterior = existente ? { ...existente } : null;
 
-  if (existente) Object.assign(existente, local);
-  else db.resultados.unshift(local);
-  atualizarCacheLocal();
+  const aplicarNaMemoria = (linha) => {
+    const atual = db.resultados.find((x) => x.id === id);
+    if (atual) Object.assign(atual, linha);
+    else db.resultados.unshift({ ...linha });
+  };
+  const desfazerNaMemoria = () => {
+    if (anterior) { const atual = db.resultados.find((x) => x.id === id); if (atual) Object.assign(atual, anterior); }
+    else db.resultados = db.resultados.filter((x) => x.id !== id);
+  };
+  const erroDaNuvem = (e) => (e?.codigo === 'RESULTADO_DUPLICADO'
+    ? 'Já existe um resultado deste aluno nesta avaliação (gravado em outro momento ou aparelho). Recarregue os dados para vê-lo.'
+    : 'Falha ao gravar na nuvem: ' + (e?.message || e));
 
+  // 1) Grava na fila local (IndexedDB) ANTES de qualquer rede: a partir daqui o resultado não se perde.
+  const item = await filaSync.enfileirar(usuarioId, {
+    resultado_id: id,
+    chave_alvo: `${av.id}|${alunoId}|${apl.turma_id}`,
+    payload,
+    imagem_ref: imagemRef,
+    confianca,
+    local,
+  });
+
+  // Plano B: navegador sem IndexedDB. Só funciona online, como antes da 6D.
+  if (!item) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return { ok: false, erro: 'Sem internet e este navegador não permite guardar o resultado no aparelho. Nada foi salvo.' };
+    }
+    try {
+      await nuvem.gravarResultadoIdempotente({ ...payload, id });
+      if (imagemRef) await nuvem.registrarScan({ resultado_id: id, imagem_url: imagemRef, respostas_detectadas: respostas, confianca });
+    } catch (e) {
+      return { ok: false, erro: erroDaNuvem(e) };
+    }
+    aplicarNaMemoria({ ...local, sync: 'sincronizado' });
+    atualizarCacheLocal();
+    return { ok: true, resultado: db.resultados.find((x) => x.id === id), aviso };
+  }
+
+  // 2) Mostra na tela como "aguardando envio". O servidor ainda não confirmou.
+  aplicarNaMemoria({ ...local, sync: 'pendente' });
+  await atualizarEstadoDaFila();
+
+  // 3) Tenta enviar agora (sem internet, não faz nada). Não deixa a tela esperando uma rede lenta.
+  await esperarNoMaximo(sincronizarFila(), ESPERA_MAX_SALVAR_MS);
+  const atual = (await filaSync.listar(usuarioId)).find((i) => i.seq === item.seq);
+
+  if (atual?.status === 'sincronizado') {
+    return { ok: true, resultado: db.resultados.find((x) => x.id === id), aviso };
+  }
+
+  // A nuvem RECUSOU este resultado (ex.: já existe outro do mesmo aluno): como antes da 6D,
+  // quem salvou na hora vê o erro e nada fica gravado. O formulário continua à mão para corrigir.
+  if (atual?.status === 'erro' && atual.permanente) {
+    await filaSync.descartar(item.seq);
+    desfazerNaMemoria();
+    await atualizarEstadoDaFila();
+    return { ok: false, erro: atual.codigo_erro === 'RESULTADO_DUPLICADO' ? erroDaNuvem({ codigo: 'RESULTADO_DUPLICADO' }) : `Falha ao gravar na nuvem: ${atual.erro || 'recusado.'}` };
+  }
+
+  // Sem internet, rede instável ou envio ainda em curso: o resultado está salvo no aparelho e segue na fila.
+  const offlineAgora = typeof navigator !== 'undefined' && navigator.onLine === false;
   return {
     ok: true,
-    resultado: local,
-    aviso: !recursos.status && !recursos.situacao
-      ? 'Nota gravada. O campo de status de revisão ainda não existe no banco.'
-      : null,
+    pendente: true,
+    resultado: db.resultados.find((x) => x.id === id),
+    mensagem: offlineAgora
+      ? 'Sem internet: resultado salvo neste aparelho. Será enviado quando a conexão voltar.'
+      : 'Resultado salvo neste aparelho. O envio à nuvem será refeito automaticamente.',
+    aviso,
   };
 }
 
@@ -771,9 +836,13 @@ export async function registrarSituacao({ avaliacao: av, aplicacao: apl, alunoId
   });
 }
 
+const MSG_AGUARDANDO_ENVIO = 'Este resultado ainda não chegou à nuvem (aguardando sincronização). Espere o envio terminar para continuar.';
+const aguardandoEnvio = (r) => Boolean(r?.sync) && r.sync !== 'sincronizado';
+
 export async function confirmarResultado(id) {
   const r = db.resultados.find((x) => x.id === id);
   if (!r) return { ok: false, erro: 'Resultado não encontrado.' };
+  if (aguardandoEnvio(r)) return { ok: false, erro: MSG_AGUARDANDO_ENVIO };
 
   if (!recursos.status && !recursos.situacao) {
     return { ok: false, erro: 'A coluna de status de revisão ainda não existe em sicep_resultados; nada foi alterado.' };
@@ -804,6 +873,7 @@ export async function confirmarResultado(id) {
 export async function excluirResultado(id) {
   const r = db.resultados.find((x) => x.id === id);
   if (!r) return { ok: false, erro: 'Resultado não encontrado.' };
+  if (aguardandoEnvio(r)) return { ok: false, erro: MSG_AGUARDANDO_ENVIO };
 
   try {
     await nuvem.api(`sicep_resultados?id=eq.${r.id}`, { method: 'DELETE' });
@@ -863,7 +933,8 @@ export async function definirTrimestre(avaliacaoId, trimestre) {
 export function pendentesDeEnvio(avaliacaoId, turmaId) {
   const idsAlunos = new Set(db.alunos.filter((a) => a.turma_id === turmaId).map((a) => a.id));
   return resultadosDaAvaliacao(avaliacaoId, turmaId)
-    .filter((r) => r.status === 'confirmado' && r.nota != null && !r.enviado_em && idsAlunos.has(r.aluno_id));
+    // Resultado ainda na fila de sincronização não existe na nuvem: não vai ao SIDED+ antes disso.
+    .filter((r) => r.status === 'confirmado' && r.nota != null && !r.enviado_em && idsAlunos.has(r.aluno_id) && !aguardandoEnvio(r));
 }
 
 export function jaEnviados(avaliacaoId, turmaId) {
@@ -885,6 +956,10 @@ export async function enviarAoSided(avaliacaoId, turmaId, resultadoIds = null) {
   if (!av.lancar_sided) return { ok: false, erro: 'Esta avaliação não está marcada para lançar no SIDED+.' };
   if (![1, 2, 3].includes(Number(av.trimestre))) {
     return { ok: false, erro: 'Esta avaliação não tem trimestre definido. Defina o trimestre antes de enviar.' };
+  }
+  // Notas só vão ao SIDED+ com conexão: sem internet nada é enviado nem marcado como enviado.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { ok: false, erro: 'Sem conexão com a internet. O envio ao SIDED+ só é feito online.' };
   }
 
   const pedidos = resultadoIds ? new Set(resultadoIds) : null;
@@ -978,9 +1053,189 @@ export async function enviarAoSided(avaliacaoId, turmaId, resultadoIds = null) {
 export function fila() { return [...db.fila]; }
 export function erros() { return [...db.erros]; }
 
+const zeroFila = () => ({ pendente: 0, sincronizando: 0, sincronizado: 0, erro: 0, aberto: 0, total: 0 });
+
+function notificarFila() {
+  ouvintesFila.forEach((f) => { try { f(); } catch (e) { /* ignora */ } });
+}
+
+/** Chama `fn` quando o estado da sincronização muda (chip, painel). Devolve a função que cancela. */
+export function aoMudarSincronizacao(fn) {
+  ouvintesFila.add(fn);
+  return () => ouvintesFila.delete(fn);
+}
+
+/** Quantos resultados ainda não chegaram à nuvem (pendentes, enviando ou com erro). */
+export function totalNaFilaDeEnvio() { return contagemFila.aberto; }
+export function contagemDaFila() { return { ...contagemFila }; }
+export function estaSincronizando() { return sincronizando; }
+
+/**
+ * Relê a fila e acerta, na memória, a marca `sync` de cada resultado:
+ * item em aberto → status do item; sem item em aberto → 'sincronizado' (ou sem marca).
+ */
+async function atualizarEstadoDaFila() {
+  const uid = db.sessao?.usuario_id;
+  if (uid == null) { contagemFila = zeroFila(); notificarFila(); return; }
+
+  const itens = await filaSync.listar(uid);
+  const c = zeroFila();
+  itens.forEach((i) => { c[i.status] = (c[i.status] || 0) + 1; c.total += 1; });
+  c.aberto = c.pendente + c.sincronizando + c.erro;
+  contagemFila = c;
+
+  const emAberto = new Map(); // itens vêm em ordem de seq: o último de cada resultado vale
+  const feitos = new Set();
+  itens.forEach((i) => {
+    if (i.status === 'sincronizado') feitos.add(i.resultado_id);
+    else emAberto.set(i.resultado_id, i.status);
+  });
+  db.resultados.forEach((r) => {
+    if (emAberto.has(r.id)) r.sync = emAberto.get(r.id);
+    else if (r.sync) r.sync = feitos.has(r.id) ? 'sincronizado' : undefined;
+  });
+  notificarFila();
+}
+
+/**
+ * Ao abrir (da nuvem ou da cópia local), recoloca na lista os resultados que ainda estão na fila.
+ * É assim que um resultado salvo offline continua na tela depois de fechar e reabrir o app.
+ * Se a nuvem já tem OUTRO resultado do mesmo aluno/avaliação, mostra o da nuvem; o item da fila
+ * fica guardado e, ao ser enviado, é barrado como duplicado (sem criar o segundo).
+ */
+async function aplicarFilaNoEstado() {
+  const uid = db.sessao?.usuario_id;
+  if (uid == null) return;
+  try {
+    const itens = (await filaSync.listar(uid)).filter((i) => i.status !== 'sincronizado');
+    itens.forEach((it) => {
+      const l = it.local;
+      if (!l) return;
+      const mesmaChave = (r) => r.avaliacao_id === l.avaliacao_id && r.aluno_id === l.aluno_id && r.turma_id === l.turma_id;
+      const propria = db.resultados.find((r) => r.id === it.resultado_id);
+      const outra = db.resultados.find((r) => r.id !== it.resultado_id && mesmaChave(r) && !r.sync);
+      if (!propria && outra) return;
+      const linha = { ...l, enviado_em: propria?.enviado_em ?? l.enviado_em ?? null, sync: it.status };
+      if (propria) Object.assign(propria, linha);
+      else db.resultados.unshift(linha);
+    });
+    await atualizarEstadoDaFila();
+  } catch (e) {
+    console.warn('[SICEP+] fila ao abrir:', e);
+  }
+}
+
+/** Chamado pela fila SÓ depois que o servidor confirmou a gravação de um item. */
+async function aoConfirmarNoServidor(item, linha) {
+  const r = db.resultados.find((x) => x.id === item.resultado_id);
+  if (r && linha?.created_at) r.criado_em = linha.created_at;
+  await atualizarEstadoDaFila();   // marca 'sincronizado' (ou mantém pendente se há operação mais nova)
+
+  // A cópia local só passa a incluir o resultado AGORA, com o servidor já tendo confirmado.
+  // Grava a linha direto: vale também quando o app foi aberto offline (dados vindos da cópia local).
+  if (r && r.sync === 'sincronizado' && db.sessao) {
+    const { sync, ...confirmada } = r;
+    await offline.gravar('resultados', db.sessao.usuario_id, r.id, confirmada);
+  }
+  atualizarCacheLocal();
+}
+
+let temporizadorRetentativa = null;
+let falhasSeguidas = 0;
+
+function agendarNovaTentativa(r) {
+  clearTimeout(temporizadorRetentativa);
+  temporizadorRetentativa = null;
+  if (r?.parou === 'rede' && !(typeof navigator !== 'undefined' && navigator.onLine === false)) {
+    // A internet "voltou" mas a nuvem ainda não responde: tenta de novo com espera crescente (5s … 60s).
+    const espera = Math.min(60000, 5000 * 2 ** falhasSeguidas);
+    falhasSeguidas += 1;
+    temporizadorRetentativa = setTimeout(() => { sincronizarFila(); }, espera);
+  } else if (r?.rodou && !r.parou) {
+    falhasSeguidas = 0;
+  }
+}
+
+/**
+ * Envia a fila ao Supabase (uma sincronização por vez, na ordem). Sem internet não faz nada.
+ * Chamada ao abrir o app, no evento `online`, ao salvar um resultado e pelo botão "Tentar agora".
+ */
+export async function sincronizarFila() {
+  const uid = db.sessao?.usuario_id;
+  if (uid == null || estado !== 'pronto') return null;
+  sincronizando = true;
+  notificarFila();
+  let r = null;
+  try {
+    r = await filaSync.processar(uid, { aoSincronizar: aoConfirmarNoServidor });
+  } finally {
+    sincronizando = false;
+  }
+  await atualizarEstadoDaFila();
+  agendarNovaTentativa(r);
+  return r;
+}
+
+/** Botão "Tentar agora": libera itens com erro (inclusive os recusados) e envia de novo. */
+export async function tentarSincronizarAgora() {
+  const uid = db.sessao?.usuario_id;
+  if (uid == null) return null;
+  await filaSync.liberarParaNovaTentativa(uid);
+  await atualizarEstadoDaFila();
+  let r = await sincronizarFila();
+  // Se já havia uma sincronização em curso, ela pode ter terminado antes de ver os itens liberados.
+  if (r && (await filaSync.contar(uid)).pendente) r = await sincronizarFila();
+  return r;
+}
+
+let sincronizacaoAtiva = false;
+
+/** Liga a sincronização automática (uma vez) e já processa a fila: é o "ao abrir o aplicativo". */
+export function ativarSincronizacao() {
+  if (!sincronizacaoAtiva && typeof window !== 'undefined') {
+    sincronizacaoAtiva = true;
+    window.addEventListener('online', () => { falhasSeguidas = 0; notificarFila(); sincronizarFila(); });
+    window.addEventListener('offline', () => notificarFila());
+    filaSync.aoMudar(() => { atualizarEstadoDaFila(); }); // mudanças feitas por outra aba
+  }
+  return sincronizarFila();
+}
+
+/** Itens da fila ainda não enviados, para o painel (com nomes para leitura humana). */
+export async function itensDaFila() {
+  const uid = db.sessao?.usuario_id;
+  if (uid == null) return [];
+  const itens = await filaSync.listar(uid);
+  return itens
+    .filter((i) => i.status !== 'sincronizado')
+    .map((i) => ({
+      seq: i.seq,
+      status: i.status,
+      tentativas: i.tentativas || 0,
+      erro: i.erro || null,
+      permanente: Boolean(i.permanente),
+      criado_em: i.criado_em,
+      aluno: aluno(i.local?.aluno_id)?.nome_completo || '—',
+      avaliacao: avaliacao(i.local?.avaliacao_id)?.titulo || '—',
+      turma: turma(i.local?.turma_id)?.nome || '',
+    }));
+}
+
+/** Descarta um item (ação explícita do usuário) e recarrega a lista a partir da nuvem/cópia local. */
+export async function descartarItemDaFila(seq) {
+  const ok = await filaSync.descartar(seq);
+  if (ok) await iniciar();
+  return ok;
+}
+
 export function estadoSincronizacao() {
-  if (estado !== 'pronto') return { classe: 'offline', texto: 'Offline' };
-  if (!navigator.onLine) return { classe: 'offline', texto: 'Offline' };
-  if (origem === 'cache') return { classe: 'offline', texto: 'Dados salvos' };
-  return { classe: '', texto: 'Sincronizado' };
+  if (estado !== 'pronto') return { classe: 'offline', texto: 'Offline', abertos: 0 };
+  const c = contagemFila;
+  const abertos = c.aberto;
+  if (!navigator.onLine) return { classe: 'offline', texto: abertos ? `Offline · ${abertos} a enviar` : 'Offline', abertos };
+  if (sincronizando && abertos) return { classe: 'pendente', texto: `Enviando ${abertos}…`, abertos };
+  if (c.erro) return { classe: 'pendente', texto: `${abertos} a enviar · ${c.erro} com erro`, abertos };
+  if (abertos) return { classe: 'pendente', texto: `${abertos} a enviar`, abertos };
+  if (origem === 'cache') return { classe: 'offline', texto: 'Dados salvos', abertos };
+  return { classe: '', texto: 'Sincronizado', abertos };
 }

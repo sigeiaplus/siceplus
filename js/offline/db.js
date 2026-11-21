@@ -7,14 +7,17 @@
    - O Supabase continua sendo a fonte oficial: aqui só há cache.
    - Cada linha leva `usuario_id`; toda leitura/gravação/limpeza
      filtra por ele (isolamento entre usuários no mesmo aparelho).
-   - Nada de fila de sincronização nem escrita offline (etapa futura).
+   - Etapa 6D: loja `fila_sync` (fila de resultados ainda não enviados).
+     Ela NÃO faz parte de LOJAS: salvarCache/limparCache nunca a tocam,
+     então atualizar ou limpar o cache não perde resultado pendente.
    - Se o IndexedDB não existir ou falhar, as funções devolvem
      null/false e o app segue funcionando só online.
    ============================================================ */
 
 const NOME_BANCO = 'sicep-offline';
-const VERSAO_BANCO = 1;
+const VERSAO_BANCO = 2;
 export const VERSAO_ESQUEMA = 1;
+const LOJA_FILA = 'fila_sync'; // chave `seq` autoincrementada: a ordem de gravação é a ordem de envio
 
 // Lojas de dados por usuário. Chave da linha: `${usuario_id}|${id}`.
 export const LOJAS = [
@@ -62,6 +65,10 @@ export function abrir() {
         }
       });
       if (!idb.objectStoreNames.contains(LOJA_SESSAO)) idb.createObjectStore(LOJA_SESSAO, { keyPath: 'id' });
+      if (!idb.objectStoreNames.contains(LOJA_FILA)) {
+        const fila = idb.createObjectStore(LOJA_FILA, { keyPath: 'seq', autoIncrement: true });
+        fila.createIndex('usuario_id', 'usuario_id', { unique: false });
+      }
     };
     req.onsuccess = () => {
       const idb = req.result;
@@ -292,6 +299,124 @@ export async function apagarSessao() {
     return true;
   } catch (e) {
     console.warn('[SICEP+] apagarSessao', e);
+    return false;
+  }
+}
+
+/* ---------------- Fila de sincronização (Etapa 6D) ---------------- */
+
+const STATUS_REGRAVAVEL = ['pendente', 'erro'];
+
+/**
+ * Enfileira uma operação de resultado para o usuário, numa única transação.
+ * Se já existe operação AINDA NÃO ENVIADA (pendente/erro) para o mesmo
+ * `resultado_id`, ela é atualizada no lugar (mesmo `seq`): a última leitura vale e
+ * não nascem duas operações para o mesmo resultado. Operação em andamento
+ * ('sincronizando') não é tocada: a nova entra depois dela, na ordem.
+ * Devolve o item gravado ou null se o IndexedDB falhar/não existir.
+ */
+export async function filaEnfileirar(usuarioId, item) {
+  const idb = await abrir();
+  if (!idb || usuarioId == null) return null;
+  try {
+    const tx = idb.transaction(LOJA_FILA, 'readwrite');
+    const loja = tx.objectStore(LOJA_FILA);
+    const pronto = fimDaTransacao(tx);
+    let gravado = null;
+
+    const todos = await aoRedor(loja.index('usuario_id').getAll(IDBKeyRange.only(usuarioId)));
+    const igual = todos.find((x) => x.resultado_id === item.resultado_id && STATUS_REGRAVAVEL.includes(x.status));
+    const agora = new Date().toISOString();
+
+    if (igual) {
+      gravado = {
+        ...igual,
+        ...item,
+        seq: igual.seq,
+        usuario_id: usuarioId,
+        status: 'pendente',
+        erro: null,
+        permanente: false,
+        tentativas: 0,
+        criado_em: igual.criado_em,
+        atualizado_em: agora,
+      };
+      loja.put(gravado);
+    } else {
+      gravado = {
+        ...item,
+        usuario_id: usuarioId,
+        status: 'pendente',
+        erro: null,
+        permanente: false,
+        tentativas: 0,
+        criado_em: agora,
+        atualizado_em: agora,
+        sincronizado_em: null,
+      };
+      const seq = await aoRedor(loja.add(gravado));
+      gravado.seq = seq;
+    }
+    await pronto;
+    return gravado;
+  } catch (e) {
+    console.warn('[SICEP+] filaEnfileirar', e);
+    return null;
+  }
+}
+
+/** Itens do usuário em ordem de gravação (seq crescente). */
+export async function filaListar(usuarioId) {
+  const idb = await abrir();
+  if (!idb || usuarioId == null) return [];
+  try {
+    const linhas = await aoRedor(
+      idb.transaction(LOJA_FILA, 'readonly').objectStore(LOJA_FILA).index('usuario_id').getAll(IDBKeyRange.only(usuarioId))
+    );
+    return linhas.sort((a, b) => a.seq - b.seq);
+  } catch (e) {
+    console.warn('[SICEP+] filaListar', e);
+    return [];
+  }
+}
+
+/**
+ * Lê, altera e regrava um item na MESMA transação (sem corrida entre abas).
+ * `mutar(item)` devolve o item novo (ou null para não mexer). Devolve o item gravado.
+ */
+export async function filaAtualizar(seq, mutar) {
+  const idb = await abrir();
+  if (!idb) return null;
+  try {
+    const tx = idb.transaction(LOJA_FILA, 'readwrite');
+    const loja = tx.objectStore(LOJA_FILA);
+    const pronto = fimDaTransacao(tx);
+    const atual = await aoRedor(loja.get(seq));
+    let novo = null;
+    if (atual) {
+      novo = mutar({ ...atual });
+      if (novo) loja.put({ ...novo, seq, atualizado_em: new Date().toISOString() });
+    }
+    await pronto;
+    return novo ? { ...novo, seq } : null;
+  } catch (e) {
+    console.warn('[SICEP+] filaAtualizar', e);
+    return null;
+  }
+}
+
+/** Remove itens da fila pelos seq informados. */
+export async function filaRemover(seqs) {
+  const idb = await abrir();
+  if (!idb || !seqs?.length) return false;
+  try {
+    const tx = idb.transaction(LOJA_FILA, 'readwrite');
+    const loja = tx.objectStore(LOJA_FILA);
+    seqs.forEach((s) => loja.delete(s));
+    await fimDaTransacao(tx);
+    return true;
+  } catch (e) {
+    console.warn('[SICEP+] filaRemover', e);
     return false;
   }
 }

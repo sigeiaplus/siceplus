@@ -1050,7 +1050,8 @@ export default function leitura(params) {
       });
 
       if (!r.ok) { toast(r.erro, 'err'); return; }
-      if (r.aviso) toast(r.aviso, 'err');
+      if (r.pendente) toast(r.mensagem, 'ok');
+      else if (r.aviso) toast(r.aviso, 'err');
 
       st.releitura = false;
       st.resultado = r.resultado;

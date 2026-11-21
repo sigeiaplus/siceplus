@@ -105,9 +105,18 @@ export function icon(nome, tamanho = 20) {
 /* ---------------- Componentes reutilizáveis ---------------- */
 
 export function syncChip(estado) {
-  return `<span class="sync ${estado.classe}" title="Sincronização na nuvem">
+  // Abre o painel da fila de sincronização (clique tratado em app.js).
+  return `<span class="sync ${estado.classe}" title="Sincronização na nuvem — toque para ver os envios" role="button" tabindex="0" data-sync-painel>
     <span class="dot"></span>${esc(estado.texto)}
   </span>`;
+}
+
+/** Situação de envio à nuvem de um resultado salvo neste aparelho (vazio quando já está na nuvem). */
+export function syncResultadoBadge(sync) {
+  if (sync === 'pendente') return badge('Aguardando envio', 'warn');
+  if (sync === 'sincronizando') return badge('Enviando…', 'warn');
+  if (sync === 'erro') return badge('Erro no envio', 'err');
+  return '';
 }
 
 export function badge(texto, tipo = '') {

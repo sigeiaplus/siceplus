@@ -601,6 +601,32 @@ export async function salvarResultado(registro) {
   return criado;
 }
 
+/**
+ * Grava um resultado da fila de sincronização (Etapa 6D), idempotente pelo `id`
+ * gerado no aparelho — repetir a mesma operação nunca cria outra linha:
+ * - já existe linha com este id (tentativa anterior chegou, ou é uma releitura):
+ *   atualiza essa mesma linha, só se algum campo mudou;
+ * - não existe: cria via salvarResultado (6C), que também barra um segundo
+ *   resultado do mesmo aluno/avaliação/turma com outro id (RESULTADO_DUPLICADO).
+ * Nunca toca em enviado_sided_em: o que já foi ao SIDED+ continua marcado.
+ */
+export async function gravarResultadoIdempotente(registro) {
+  if (!registro?.id) throw new Error('Resultado sem id: não dá para gravar de forma idempotente.');
+  const [porId] = await api(`sicep_resultados?id=eq.${registro.id}&select=*&limit=1`) || [];
+  if (!porId) return salvarResultado(registro);
+
+  const { id, ...corpo } = registro;
+  const mudou = Object.keys(corpo).some((k) => JSON.stringify(porId[k] ?? null) !== JSON.stringify(corpo[k] ?? null));
+  if (!mudou) return porId;
+  const [atual] = await api(`sicep_resultados?id=eq.${id}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(corpo),
+  }) || [];
+  // PATCH sem linha de volta = a linha sumiu entre a leitura e a gravação: recria com o mesmo id.
+  return atual || salvarResultado(registro);
+}
+
 export async function registrarScan({ resultado_id, imagem_url, respostas_detectadas, confianca }) {
   return api('sicep_ocr_scans', {
     method: 'POST',

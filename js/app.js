@@ -17,6 +17,7 @@ import avaliacaoDetalheScreen from './screens/avaliacao-detalhe.js';
 import cartoesScreen from './screens/cartoes.js';
 import leituraScreen from './screens/leitura.js';
 import resultadosScreen from './screens/resultados.js';
+import { abrirPainelFila } from './screens/fila-painel.js';
 
 const NAV = [
   { hash: '#/inicio', label: 'Início', icone: 'home' },
@@ -117,7 +118,14 @@ function shell(hash, conteudo, titulo) {
 
   app.append(sidenav, main, bottom);
 
-  app.querySelectorAll('[data-sair]').forEach((b) => b.addEventListener('click', () => store.sair()));
+  app.querySelectorAll('[data-sair]').forEach((b) => b.addEventListener('click', () => {
+    const n = store.totalNaFilaDeEnvio();
+    if (n && !window.confirm(
+      `Há ${n} resultado(s) salvo(s) neste aparelho que ainda não chegaram à nuvem.\n\n`
+      + 'Eles NÃO serão apagados: ficam guardados e serão enviados quando você entrar de novo com internet.\n\nSair mesmo assim?'
+    )) return;
+    store.sair();
+  }));
 
   return app;
 }
@@ -147,7 +155,28 @@ function montarApp() {
   if (!location.hash || !resolver(location.hash)) location.replace('#/inicio');
   render();
   window.addEventListener('hashchange', render);
+  // Fila de sincronização (6D): processa ao abrir e liga o evento `online`.
+  store.ativarSincronizacao();
 }
+
+/* Chip de sincronização sempre atual (fila, online/offline) e clicável para abrir o painel. */
+function atualizarChips() {
+  const estado = store.estadoSincronizacao();
+  document.querySelectorAll('.sync').forEach((chip) => chip.replaceWith(el(syncChip(estado))));
+}
+store.aoMudarSincronizacao(atualizarChips);
+window.addEventListener('online', atualizarChips);
+window.addEventListener('offline', atualizarChips);
+
+document.addEventListener('click', (ev) => {
+  if (ev.target.closest?.('[data-sync-painel]') && store.autenticado()) abrirPainelFila();
+});
+document.addEventListener('keydown', (ev) => {
+  if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.closest?.('[data-sync-painel]') && store.autenticado()) {
+    ev.preventDefault();
+    abrirPainelFila();
+  }
+});
 
 function montarLogin() {
   const app = document.getElementById('app');

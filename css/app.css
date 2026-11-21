@@ -370,6 +370,7 @@ img { max-width: 100%; display: block; }
 .sync .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .sync.pendente { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn); }
 .sync.offline  { background: #F1F2F5; border-color: var(--line-strong); color: var(--ink-2); }
+.sync[data-sync-painel] { cursor: pointer; }
 
 /* ---------------- Listas ---------------- */
 
