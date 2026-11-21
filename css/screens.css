@@ -576,3 +576,42 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 
 /* Foco visível em amarelo (sem realce azul no mobile). */
 .res-root :focus-visible, .res-modal :focus-visible { outline: 2px solid var(--y-600); outline-offset: 2px; }
+
+/* ---------------- Desempenho por habilidade (Etapa 4C) ---------------- */
+
+.des-filtros {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.des-hab {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) 110px minmax(140px, .9fr);
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.des-hab + .des-hab { margin-top: 2px; }
+.des-hab.dominio { border-left: 3px solid var(--ok); }
+.des-hab.reforco { border-left: 3px solid var(--err); background: var(--err-bg); }
+.des-info { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.des-cod { font-weight: 800; font-size: 14px; letter-spacing: .01em; }
+.des-desc { font-size: 13px; color: var(--ink-2); }
+.des-nums { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--ink-2); }
+.des-nums strong { color: var(--ink); }
+.des-pct { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+.des-pct > strong { font-size: 15px; }
+.des-pct .perf { width: 100%; }
+.des-destaque { align-items: flex-start; }
+
+@media (max-width: 640px) {
+  .des-hab { grid-template-columns: 1fr; gap: 7px; }
+  .des-nums { flex-direction: row; gap: 14px; }
+  .des-pct { align-items: flex-start; }
+  .des-pct > strong { font-size: 14px; }
+}

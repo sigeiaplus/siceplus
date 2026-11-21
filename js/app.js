@@ -17,6 +17,7 @@ import avaliacaoDetalheScreen from './screens/avaliacao-detalhe.js';
 import cartoesScreen from './screens/cartoes.js';
 import leituraScreen from './screens/leitura.js';
 import resultadosScreen from './screens/resultados.js';
+import desempenhoScreen from './screens/desempenho.js';
 import { abrirPainelFila } from './screens/fila-painel.js';
 
 const NAV = [
@@ -25,6 +26,7 @@ const NAV = [
   { hash: '#/cartoes', label: 'Cartões', icone: 'cards' },
   { hash: '#/leitura', label: 'Leitura', icone: 'camera' },
   { hash: '#/resultados', label: 'Resultados', icone: 'chart' },
+  { hash: '#/desempenho', label: 'Desempenho', icone: 'target' },
 ];
 
 const ROTAS = [
@@ -37,6 +39,7 @@ const ROTAS = [
   { re: /^#\/leitura\/([\w-]+)\/([\w-]+)$/, view: leituraScreen, titulo: 'Reler cartão' },
   { re: /^#\/leitura$/, view: leituraScreen, titulo: 'Leitura de cartões' },
   { re: /^#\/resultados$/, view: resultadosScreen, titulo: 'Resultados' },
+  { re: /^#\/desempenho$/, view: desempenhoScreen, titulo: 'Desempenho' },
 ];
 
 // #app é apenas um contêiner: a classe .app pertence ao shell montado por shell().

@@ -275,7 +275,7 @@ export default function resultados() {
       <div class="page-head res-head-page">
         <span class="eyebrow">Resultados</span>
         <h1>Notas e desempenho</h1>
-        <p>Escolha a avaliação e a turma para ver os resultados.</p>
+        <p>Escolha a avaliação e a turma para ver os resultados. Análise por habilidade em <a href="#/desempenho">Desempenho</a>.</p>
       </div>
 
       ${avs.length ? `
@@ -356,7 +356,7 @@ export default function resultados() {
       <div class="page-head res-head-page">
         <span class="eyebrow">Resultados</span>
         <h1>Notas e desempenho</h1>
-        <p>Selecione os alunos para revisar, reler ou excluir. O envio ao SIDED+ é feito na tela da <a href="#/avaliacoes">Avaliação</a>.</p>
+        <p>Selecione os alunos para revisar, reler ou excluir. O envio ao SIDED+ é feito na tela da <a href="#/avaliacoes">Avaliação</a>. Veja também o <a href="#/desempenho">desempenho por habilidade</a>.</p>
       </div>
 
       <div class="card row between wrap" style="gap:10px;align-items:center">

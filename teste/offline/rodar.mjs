@@ -336,7 +336,7 @@ async function cenarioSided() {
 async function cenarioServiceWorker() {
   console.log('\n12. Cache e atualização do Service Worker');
   const txt = fs.readFileSync(new URL('../../sw.js', import.meta.url), 'utf8');
-  ok(/sicep-v25/.test(txt), 'cache do app avançou para v25');
+  ok(/sicep-v26/.test(txt), 'cache do app avançou para v26');
   ok(txt.includes("./js/offline/fila.js") && txt.includes("./js/offline/db.js"), 'fila e banco offline no app shell');
   ok(txt.includes("./js/screens/fila-painel.js"), 'painel da fila no app shell');
   ok(/network|cache: 'reload'|fetch\(req\)/.test(txt), 'estratégia de atualização presente');
@@ -444,6 +444,95 @@ async function cenarioHabilidades() {
   igual(questoesDe(id).find((q) => Number(q.numero) === 2)?.habilidade_bncc, 'EF06MA03,EF06MA20', 'questão 2 mantém a seleção');
 }
 
+async function cenarioDesempenho() {
+  console.log('\n21-28. Desempenho por habilidade: múltiplas, acertos/erros, anuladas, antigas e offline');
+  preparar();
+  fake.reset({
+    turmas: [{ id: 't1', nome: '1º A', ano: 2026, turno: 'Manhã', ano_serie: '1º ano' }],
+    disciplinas: [{ id: 'd1', nome: 'Matemática' }],
+    turma_disciplinas: [{ id: 'td1', turma_id: 't1', disciplina_id: 'd1', professor_id: 'p1' }],
+    alunos: [
+      { id: 'a1', nome_completo: 'Ana Silva', turma_id: 't1' },
+      { id: 'a2', nome_completo: 'Bruno Souza', turma_id: 't1' },
+    ],
+    escolas: [{ id: 'e1', nome: 'Escola Teste' }],
+    divisoes: [{ id: 'div1', nome: '1º TRIMESTRE', ordem: 1, tipo: 'Trimestral' }],
+    parametro_divisoes: [{ id: 'pd1', divisao_id: 'div1', ordem_divisao: 1, parametro_id: 'par1' }],
+    habilidades_planejamento: [
+      { id: 'h1', turma_disciplina_id: 'td1', codigo: 'EF06MA01', descricao: 'Frações', temas: ['Números'], divisao_id: 'div1' },
+      { id: 'h2', turma_disciplina_id: 'td1', codigo: 'EF06MA03', descricao: 'Porcentagem', temas: ['Números'], divisao_id: 'div1' },
+      { id: 'h3', turma_disciplina_id: 'td1', codigo: 'EF06MA10', descricao: 'Geometria', temas: ['Geometria'], divisao_id: 'div1' },
+    ],
+  });
+  nav.onLine = true;
+
+  const store = await abrirApp();
+  await store.iniciar();
+
+  const dadosAv = base('Prova com habilidades');
+  dadosAv.questoes = [
+    { numero: 1, enunciado: 'Q1', valor: 3, gabarito: 'A', anulada: false, habilidade_bncc: 'EF06MA01,EF06MA03' },
+    { numero: 2, enunciado: 'Q2', valor: 3, gabarito: 'B', anulada: false, habilidade_bncc: 'EF06MA01' },
+    { numero: 3, enunciado: 'Q3', valor: 4, gabarito: 'C', anulada: true, habilidade_bncc: 'EF06MA03' },
+  ];
+  const id = await store.salvarAvaliacao(dadosAv);
+  const av = store.avaliacao(id);
+  const apl = av.aplicacoes[0];
+
+  // Avaliação antiga: sem trimestre, sem habilidade e com gabarito diferente.
+  const antiga = base('Antiga sem habilidades');
+  antiga.trimestre = null;
+  antiga.questoes = [
+    { numero: 1, enunciado: 'Q1', valor: 5, gabarito: 'D' },
+    { numero: 2, enunciado: 'Q2', valor: 5, gabarito: 'E' },
+  ];
+  await store.salvarAvaliacao(antiga);
+
+  // Corrige os dois alunos no aparelho, sem internet.
+  nav.onLine = false;
+  const r1 = await store.salvarResultado({ avaliacao: av, aplicacao: apl, alunoId: 'a1', respostas: { 1: 'A', 2: 'A', 3: 'C' }, revisado: true });
+  const r2 = await store.salvarResultado({ avaliacao: av, aplicacao: apl, alunoId: 'a2', respostas: { 1: 'B', 2: 'B', 3: 'A' }, revisado: true });
+  ok(r1.ok && r2.ok, 'resultados corrigidos salvos no aparelho (offline)');
+
+  const mod = await import('../../js/desempenho.js');
+  const porCodigo = (rel, c) => rel.habilidades.find((h) => h.codigo === c) || null;
+  const relOffline = mod.calcular(store.get(), { turmaId: 't1' });
+  const h1 = porCodigo(relOffline, 'EF06MA01');
+  const h2 = porCodigo(relOffline, 'EF06MA03');
+
+  igual(h1?.questoes, 2, 'Q1 e Q2 relacionadas à primeira habilidade');
+  igual([h1?.acertos, h1?.erros, h1?.percentual], [2, 2, 50], 'uma habilidade por questão: 2 acertos, 2 erros, 50% (offline)');
+  igual([h2?.questoes, h2?.acertos, h2?.erros, h2?.percentual], [1, 1, 1, 50], 'habilidade compartilhada conta a questão uma vez e ignora a anulada');
+  igual(h1?.descricao, 'Frações', 'descrição vem do planejamento');
+  ok(!porCodigo(relOffline, 'EF06MA10'), 'habilidade do planejamento sem questão vinculada não aparece');
+  igual(relOffline.resumo.alunosAvaliados, 2, 'dois alunos avaliados');
+  igual([relOffline.resumo.acertos, relOffline.resumo.erros, relOffline.resumo.percentual], [2, 2, 50], 'aproveitamento geral não conta duas vezes a questão múltipla');
+  igual(relOffline.resumo.questoesComHabilidade, 2, 'duas questões com habilidade (a anulada fica fora)');
+
+  const ana = relOffline.alunos.find((a) => a.aluno_id === 'a1');
+  const bruno = relOffline.alunos.find((a) => a.aluno_id === 'a2');
+  igual(ana?.habilidades.find((h) => h.codigo === 'EF06MA01')?.percentual, 50, 'aluno com um acerto e um erro na mesma habilidade: 50%');
+  igual(ana?.habilidades.find((h) => h.codigo === 'EF06MA03')?.percentual, 100, 'aluno com acerto na habilidade compartilhada: 100%');
+  igual(ana?.maiorDificuldade, 'EF06MA01', 'maior dificuldade do aluno identificada');
+  igual(bruno?.habilidades.find((h) => h.codigo === 'EF06MA03')?.percentual, 0, 'aluno com erro na habilidade compartilhada: 0%');
+  igual(bruno?.maiorDificuldade, 'EF06MA03', 'maior dificuldade do segundo aluno');
+  ok(!relOffline.habilidades.some((h) => h.codigo === 'EF06MA10'), 'avaliação antiga/sem vínculo não cria habilidade');
+
+  const resumo1 = relOffline.habilidades.map((h) => [h.codigo, h.acertos, h.erros]);
+  const resumo2 = mod.calcular(store.get(), { turmaId: 't1' }).habilidades.map((h) => [h.codigo, h.acertos, h.erros]);
+  igual(resumo2, resumo1, 'cálculo é determinístico e não duplica resultados');
+
+  // Sincroniza o que foi corrigido offline e confere que nada muda nos percentuais.
+  nav.onLine = true;
+  await store.sincronizarFila();
+  const relOnline = mod.calcular(store.get(), { turmaId: 't1' });
+  igual(relOnline.habilidades.map((h) => [h.codigo, h.acertos, h.erros]), resumo1, 'após sincronizar, acertos e erros continuam iguais');
+  igual(fake.tabelas.sicep_resultados.length, 2, 'resultados chegaram à nuvem uma única vez');
+
+  igual(mod.calcular(store.get(), { turmaId: 't1', trimestre: 2 }).habilidades.length, 0, 'filtro de trimestre sem avaliações não inventa dados');
+  igual(mod.calcular(store.get(), { turmaId: 't1', trimestre: 1 }).habilidades.length, 2, 'filtro do 1º trimestre mantém as duas habilidades');
+}
+
 const cenarios = [
   cenarioCriacaoEdicaoOfflineEConflito,
   cenarioConflitoMantendoNuvem,
@@ -453,6 +542,7 @@ const cenarios = [
   cenarioSided,
   cenarioServiceWorker,
   cenarioHabilidades,
+  cenarioDesempenho,
 ];
 
 for (const cenario of cenarios) {

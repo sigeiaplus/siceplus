@@ -95,6 +95,7 @@ const PATHS = {
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
   download: '<path d="M12 4v11"/><path d="M8 11.5 12 15.5l4-4"/><path d="M4.5 19.5h15"/>',
+  target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/>',
 };
 
 export function icon(nome, tamanho = 20) {
