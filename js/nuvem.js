@@ -186,6 +186,7 @@ export async function detectarRecursos() {
   const recursos = {
     prazo: false, faixas: false, anulada: false, situacao: false, status: false,
     turma_disciplina: false, revisado: false, enviado: false, trimestre: false,
+    habilidade_bncc: false, habilidades: false,
   };
 
   const teste = async (path, chave) => {
@@ -207,6 +208,9 @@ export async function detectarRecursos() {
     teste('sicep_resultados?select=revisado_em', 'revisado'),
     teste('sicep_resultados?select=enviado_sided_em', 'enviado'),
     teste('sicep_avaliacoes?select=trimestre', 'trimestre'),
+    teste('sicep_questoes?select=habilidade_bncc', 'habilidade_bncc'),
+    // Etapa 4B: habilidades do planejamento (SIDED+). Sem tabela/RLS, o recurso fica desligado.
+    teste('habilidades_planejamento?select=codigo', 'habilidades'),
   ]);
 
   return recursos;
@@ -222,6 +226,8 @@ export async function carregarAvaliacoes(usuarioId, recursos) {
 
   const colunasQuestao = ['id', 'numero', 'enunciado', 'valor', 'num_alternativas', 'gabarito'];
   if (recursos?.anulada) colunasQuestao.push('anulada');
+  // A coluna existe no banco; só é lida quando o recurso foi confirmado.
+  if (recursos?.habilidade_bncc) colunasQuestao.push('habilidade_bncc');
 
   const campos = [
     'id', 'titulo', 'descricao', 'disciplina', 'valor_total', 'data_aplicacao',
@@ -268,9 +274,105 @@ export async function carregarAvaliacoes(usuarioId, recursos) {
         num_alternativas: Number(q.num_alternativas || 4),
         gabarito: q.gabarito || null,
         anulada: !!q.anulada,
+        habilidade_bncc: q.habilidade_bncc || null,
       })),
     criado_em: a.created_at,
   }));
+}
+
+/* ---------------- Identificadores gerados no dispositivo ---------------- */
+
+/* ---------------- Habilidades do planejamento (Etapa 4B) ---------------- */
+
+/** Erro de leitura de habilidades com uma mensagem clara para a tela. */
+function erroDeHabilidades(e) {
+  const status = Number(e?.status) || 0;
+  const texto = String(e?.message || '');
+  let mensagem;
+  if (status === 401 || status === 403 || /permission denied|row-level security|\bRLS\b/i.test(texto)) {
+    mensagem = 'O banco recusou a leitura das habilidades por permissão (RLS). Fale com a gestão para liberar a tabela habilidades_planejamento.';
+  } else if (status === 404 || /PGRST205|42P01|does not exist/i.test(texto)) {
+    mensagem = 'A tabela habilidades_planejamento não existe neste banco. Nenhuma habilidade foi carregada.';
+  } else {
+    mensagem = `Não foi possível carregar as habilidades agora${texto ? `: ${texto.slice(0, 160)}` : '.'}`;
+  }
+  const erro = new Error(mensagem);
+  erro.codigo = 'HABILIDADES_INDISPONIVEIS';
+  erro.status = status || null;
+  erro.causa = e;
+  return erro;
+}
+
+/** Códigos separados por vírgula, sem vazios e sem repetição. */
+export function normalizarCodigos(valor) {
+  const lista = String(valor ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return lista.length ? [...new Set(lista)].join(',') : null;
+}
+
+/**
+ * Habilidades cadastradas no planejamento (SIDED+) para os vínculos turma × disciplina.
+ * O trimestre de cada habilidade vem da `ordem_divisao` em `parametro_divisoes`
+ * (1..3 = trimestres; 4 = recuperação final). Sem essa informação, tenta o nome da divisão.
+ * Lança erro com `codigo = 'HABILIDADES_INDISPONIVEIS'` quando a leitura falha (RLS, tabela ausente…).
+ */
+export async function carregarHabilidades(turmaDisciplinaIds) {
+  const ids = [...new Set((turmaDisciplinaIds || []).filter(Boolean).map(String))];
+  if (!ids.length) return { habilidades: [], divisoes: [] };
+
+  let linhas;
+  try {
+    linhas = await api(
+      `habilidades_planejamento?turma_disciplina_id=in.(${ids.join(',')})` +
+      '&select=id,turma_disciplina_id,codigo,descricao,temas,divisao_id&order=codigo.asc'
+    ) || [];
+  } catch (e) {
+    throw erroDeHabilidades(e);
+  }
+
+  const trimestrePorDivisao = new Map();
+  const nomePorDivisao = new Map();
+
+  try {
+    const parametros = await api('parametro_divisoes?select=divisao_id,ordem_divisao,parametro_id') || [];
+    parametros.forEach((pd) => {
+      const ordem = Number(pd.ordem_divisao);
+      const trimestre = Number.isInteger(ordem) && ordem >= 1 && ordem <= 3 ? ordem : null;
+      if (!trimestrePorDivisao.has(pd.divisao_id)) trimestrePorDivisao.set(pd.divisao_id, trimestre);
+    });
+  } catch (e) {
+    // Sem parâmetro_divisoes: o nome da divisão ainda pode dizer o trimestre.
+    console.warn('[SICEP+] parametro_divisoes indisponível:', e.message);
+  }
+
+  try {
+    const divisoes = await api('divisoes?select=id,nome,ordem,tipo') || [];
+    divisoes.forEach((d) => {
+      nomePorDivisao.set(d.id, d.nome || null);
+      if (trimestrePorDivisao.has(d.id)) return;
+      const achado = String(d.nome || '').match(/([1-3])\s*[ºo°]?\s*trimestre/i);
+      if (achado) trimestrePorDivisao.set(d.id, Number(achado[1]));
+    });
+  } catch (e) {
+    console.warn('[SICEP+] divisoes indisponível:', e.message);
+  }
+
+  const habilidades = linhas
+    .map((h) => ({
+      id: h.id,
+      turma_disciplina_id: h.turma_disciplina_id,
+      codigo: String(h.codigo || '').trim(),
+      descricao: h.descricao || '',
+      temas: Array.isArray(h.temas) ? h.temas.filter(Boolean) : [],
+      divisao_id: h.divisao_id || null,
+      divisao_nome: nomePorDivisao.get(h.divisao_id) || null,
+      trimestre: trimestrePorDivisao.get(h.divisao_id) ?? null,
+    }))
+    .filter((h) => h.codigo);
+
+  return { habilidades, divisoes: [...nomePorDivisao.values()].filter(Boolean) };
 }
 
 /* ---------------- Identificadores gerados no dispositivo ---------------- */
@@ -356,6 +458,21 @@ async function sincronizarQuestoes(avaliacaoId, questoes, numAlternativas, opcoe
 // São preservadas quando a linha do servidor já as tem — nunca inventadas nem apagadas.
 const CAMPOS_EXTRA_QUESTAO = ['habilidade', 'habilidade_id', 'descritor', 'bncc'];
 
+// Coluna real de habilidades (Etapa 4B). Confirmada uma vez por sessão para
+// nunca tentar gravar em bancos que ainda não a tenham.
+let suportaHabilidadeBncc = null;
+async function temColunaHabilidadeBncc() {
+  if (suportaHabilidadeBncc !== null) return suportaHabilidadeBncc;
+  try {
+    await api('sicep_questoes?select=habilidade_bncc&limit=1');
+    suportaHabilidadeBncc = true;
+  } catch (e) {
+    suportaHabilidadeBncc = false;
+    console.warn('[SICEP+] coluna habilidade_bncc indisponível:', e.message);
+  }
+  return suportaHabilidadeBncc;
+}
+
 async function sincronizarQuestoesUmaVez(avaliacaoId, questoes, numAlternativas, { remover }) {
   let temAnulada = true;
   let atuais;
@@ -368,6 +485,8 @@ async function sincronizarQuestoesUmaVez(avaliacaoId, questoes, numAlternativas,
     atuais = await api(`sicep_questoes?avaliacao_id=eq.${avaliacaoId}&select=id,numero,enunciado,valor,num_alternativas,gabarito&order=numero.asc`) || [];
   }
 
+  const temHabilidade = await temColunaHabilidadeBncc();
+
   const porNumero = new Map();
   atuais.forEach((q) => { if (!porNumero.has(Number(q.numero))) porNumero.set(Number(q.numero), q); });
 
@@ -376,6 +495,11 @@ async function sincronizarQuestoesUmaVez(avaliacaoId, questoes, numAlternativas,
     CAMPOS_EXTRA_QUESTAO.forEach((campo) => {
       if (ex && Object.prototype.hasOwnProperty.call(ex, campo) && Object.prototype.hasOwnProperty.call(q, campo)) extras[campo] = q[campo];
     });
+    // Habilidades: sempre gravadas quando a coluna existe. Ausente na entrada = preserva
+    // o que já está no servidor (nada é apagado por falha de carregamento).
+    if (temHabilidade && Object.prototype.hasOwnProperty.call(q, 'habilidade_bncc')) {
+      extras.habilidade_bncc = normalizarCodigos(q.habilidade_bncc);
+    }
     return extras;
   };
   const corpoDe = (q, ex = null) => ({
@@ -392,6 +516,8 @@ async function sincronizarQuestoesUmaVez(avaliacaoId, questoes, numAlternativas,
     && Number(ex.num_alternativas) === c.num_alternativas
     && (ex.gabarito || null) === (c.gabarito || null)
     && (!temAnulada || !!ex.anulada === !!q.anulada)
+    && (!temHabilidade || !Object.prototype.hasOwnProperty.call(c, 'habilidade_bncc')
+      || normalizarCodigos(ex.habilidade_bncc) === normalizarCodigos(c.habilidade_bncc))
     && CAMPOS_EXTRA_QUESTAO.every((campo) => !Object.prototype.hasOwnProperty.call(ex, campo)
       || !Object.prototype.hasOwnProperty.call(c, campo)
       || JSON.stringify(ex[campo] ?? null) === JSON.stringify(c[campo] ?? null))
@@ -552,6 +678,8 @@ function versaoDaAvaliacao(avaliacao, questoes) {
     num_alternativas: Number(q.num_alternativas || 4),
     gabarito: q.gabarito || null,
     anulada: !!q.anulada,
+    // Habilidades entram na comparação: editar só os vínculos também detecta divergência.
+    habilidade_bncc: normalizarCodigos(q.habilidade_bncc),
   })).sort((a, b) => a.numero - b.numero);
   return {
     titulo: av.titulo || '',
@@ -591,6 +719,7 @@ export async function lerAvaliacaoDaNuvem(avaliacaoId) {
       questoes: questoes.map((q) => ({
         numero: Number(q.numero), valor: Number(q.valor || 0),
         gabarito: q.gabarito || null, enunciado: q.enunciado || '', anulada: !!q.anulada,
+        habilidade_bncc: normalizarCodigos(q.habilidade_bncc),
       })),
     },
   };

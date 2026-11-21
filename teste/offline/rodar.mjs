@@ -336,13 +336,113 @@ async function cenarioSided() {
 async function cenarioServiceWorker() {
   console.log('\n12. Cache e atualização do Service Worker');
   const txt = fs.readFileSync(new URL('../../sw.js', import.meta.url), 'utf8');
-  ok(/sicep-v24/.test(txt), 'cache do app avançou para v24');
+  ok(/sicep-v25/.test(txt), 'cache do app avançou para v25');
   ok(txt.includes("./js/offline/fila.js") && txt.includes("./js/offline/db.js"), 'fila e banco offline no app shell');
   ok(txt.includes("./js/screens/fila-painel.js"), 'painel da fila no app shell');
   ok(/network|cache: 'reload'|fetch\(req\)/.test(txt), 'estratégia de atualização presente');
 }
 
 /* ---------------- Execução ---------------- */
+
+async function cenarioHabilidades() {
+  console.log('\n13-20. Habilidades do planejamento: carga, trimestre, múltipla, gravação e preservação');
+  preparar();
+  fake.reset({
+    turmas: [
+      { id: 't1', nome: '1º A', ano: 2026, turno: 'Manhã', ano_serie: '1º ano' },
+      { id: 't2', nome: '2º B', ano: 2026, turno: 'Tarde', ano_serie: '2º ano' },
+    ],
+    disciplinas: [{ id: 'd1', nome: 'Matemática' }],
+    turma_disciplinas: [
+      { id: 'td1', turma_id: 't1', disciplina_id: 'd1', professor_id: 'p1' },
+      { id: 'td2', turma_id: 't2', disciplina_id: 'd1', professor_id: 'p1' },
+    ],
+    alunos: [],
+    escolas: [{ id: 'e1', nome: 'Escola Teste' }],
+    divisoes: [
+      { id: 'div1', nome: '1º TRIMESTRE', ordem: 1, tipo: 'Trimestral' },
+      { id: 'div2', nome: '2º TRIMESTRE', ordem: 2, tipo: 'Trimestral' },
+    ],
+    parametro_divisoes: [
+      { id: 'pd1', divisao_id: 'div1', ordem_divisao: 1, parametro_id: 'par1' },
+      { id: 'pd2', divisao_id: 'div2', ordem_divisao: 2, parametro_id: 'par1' },
+    ],
+    habilidades_planejamento: [
+      { id: 'h1', turma_disciplina_id: 'td1', codigo: 'EF06MA01', descricao: 'Frações', temas: ['Números'], divisao_id: 'div1' },
+      { id: 'h2', turma_disciplina_id: 'td1', codigo: 'EF06MA03', descricao: 'Porcentagem', temas: ['Números'], divisao_id: 'div1' },
+      { id: 'h3', turma_disciplina_id: 'td1', codigo: 'EF06MA10', descricao: 'Geometria', temas: ['Geometria'], divisao_id: 'div2' },
+      { id: 'h4', turma_disciplina_id: 'td2', codigo: 'EF06MA01', descricao: 'Frações', temas: ['Números'], divisao_id: 'div1' },
+      { id: 'h5', turma_disciplina_id: 'td2', codigo: 'EF06MA20', descricao: 'Álgebra na turma 2', temas: ['Álgebra'], divisao_id: 'div1' },
+    ],
+  });
+  nav.onLine = true;
+
+  const store = await abrirApp();
+  let r = await store.iniciar();
+  igual(r.estado, 'pronto', 'abre online com habilidades');
+  igual(store.habilidades().length, 5, 'carrega as habilidades dos dois vínculos');
+  ok(store.tem('habilidades'), 'recurso de habilidades disponível');
+  igual(store.erroDeHabilidades(), null, 'sem erro de leitura de habilidades');
+
+  igual(store.habilidadesDoContexto(['td1'], 1).map((h) => h.codigo), ['EF06MA01', 'EF06MA03'], 'filtra por vínculo e 1º trimestre (ordem_divisao)');
+  igual(store.habilidadesDoContexto(['td1'], 2).map((h) => h.codigo), ['EF06MA10'], 'filtra o 2º trimestre pela ordem_divisao');
+  igual(store.habilidadesDoContexto(['td1'], null).map((h) => h.codigo), ['EF06MA01', 'EF06MA03', 'EF06MA10'], 'sem trimestre mostra todas do vínculo');
+
+  const multi = store.habilidadesDoContexto(['td1', 'td2'], 1);
+  igual(multi.map((h) => h.codigo), ['EF06MA01', 'EF06MA03', 'EF06MA20'], 'várias turmas usam a união das habilidades');
+  igual(multi.find((h) => h.codigo === 'EF06MA01')?.vinculos.sort(), ['td1', 'td2'], 'código comum guarda os dois contextos');
+
+  const dados = base('Com habilidades');
+  dados.aplicacoes = [
+    { turma_id: 't1', turma_disciplina_id: 'td1', disciplina_id: 'd1', professor_id: 'p1' },
+    { turma_id: 't2', turma_disciplina_id: 'td2', disciplina_id: 'd1', professor_id: 'p1' },
+  ];
+  dados.questoes[0] = { ...dados.questoes[0], habilidade_bncc: 'EF06MA01,EF06MA03' };
+  dados.questoes[1] = { ...dados.questoes[1], habilidade_bncc: 'EF06MA20' };
+  dados.questoes[2] = { ...dados.questoes[2], habilidade_bncc: null };
+
+  const id = await store.salvarAvaliacao(dados);
+  igual(questoesDe(id).find((q) => Number(q.numero) === 1)?.habilidade_bncc, 'EF06MA01,EF06MA03', 'grava vários códigos separados por vírgula');
+  igual(questoesDe(id).find((q) => Number(q.numero) === 2)?.habilidade_bncc, 'EF06MA20', 'grava a habilidade da questão 2');
+  igual(questoesDe(id).find((q) => Number(q.numero) === 3)?.habilidade_bncc ?? null, null, 'questão sem habilidade fica sem vínculo');
+  igual(store.avaliacao(id)?.questoes.find((q) => q.numero === 1)?.habilidade_bncc, 'EF06MA01,EF06MA03', 'cópia local também guarda as habilidades');
+
+  const store2 = await abrirApp();
+  await store2.iniciar();
+  igual(store2.avaliacao(id)?.questoes.find((q) => q.numero === 1)?.habilidade_bncc, 'EF06MA01,EF06MA03', 'reabrir a avaliação reconstrói as seleções');
+
+  const ed = base('Com habilidades editada');
+  ed.aplicacoes = dados.aplicacoes;
+  ed.questoes[0] = { ...ed.questoes[0], habilidade_bncc: 'EF06MA01' };
+  ed.questoes[1] = { ...ed.questoes[1], habilidade_bncc: 'EF06MA03,EF06MA20' };
+  await store2.salvarAvaliacao({ ...ed, id });
+  igual(questoesDe(id).find((q) => Number(q.numero) === 1)?.habilidade_bncc, 'EF06MA01', 'edição atualiza a seleção (removeu uma)');
+  igual(questoesDe(id).find((q) => Number(q.numero) === 2)?.habilidade_bncc, 'EF06MA03,EF06MA20', 'edição grava a nova seleção múltipla');
+  igual(questoesDe(id).length, 3, 'questões não são recriadas ao editar habilidades');
+  semQuestoesDuplicadas();
+
+  // Falha de leitura (RLS) ao reabrir: lista anterior continua no cache e a tela é avisada.
+  fake.falhar({ metodo: 'GET', tabela: 'habilidades_planejamento', restantes: 2, tipo: 'antes', status: 403 });
+  const store3 = await abrirApp();
+  const r3 = await store3.iniciar();
+  igual(r3.estado, 'pronto', 'app abre mesmo com falha de RLS nas habilidades');
+  ok(Boolean(store3.erroDeHabilidades()), 'falha de leitura fica visível para a tela');
+  ok(store3.habilidades().length > 0, 'não apaga as habilidades já carregadas (cópia local)');
+
+  // Edição sem a propriedade habilidade_bncc (ex.: cache antigo) preserva o que está na nuvem.
+  const store4 = await abrirApp();
+  await store4.iniciar();
+  const semHab = base('Sem tocar em habilidades');
+  semHab.aplicacoes = dados.aplicacoes;
+  semHab.questoes = [
+    { numero: 1, enunciado: 'Q1', valor: 3, gabarito: 'A' },
+    { numero: 2, enunciado: 'Q2', valor: 3, gabarito: 'B' },
+    { numero: 3, enunciado: 'Q3', valor: 4, gabarito: 'C' },
+  ];
+  await store4.salvarAvaliacao({ ...semHab, id });
+  igual(questoesDe(id).find((q) => Number(q.numero) === 1)?.habilidade_bncc, 'EF06MA01', 'entrada sem a propriedade não apaga a habilidade');
+  igual(questoesDe(id).find((q) => Number(q.numero) === 2)?.habilidade_bncc, 'EF06MA03,EF06MA20', 'questão 2 mantém a seleção');
+}
 
 const cenarios = [
   cenarioCriacaoEdicaoOfflineEConflito,
@@ -352,6 +452,7 @@ const cenarios = [
   cenarioRecusaPreservaResultados,
   cenarioSided,
   cenarioServiceWorker,
+  cenarioHabilidades,
 ];
 
 for (const cenario of cenarios) {

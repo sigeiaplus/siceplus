@@ -31,6 +31,7 @@ export function instalarNuvemFalsa() {
         turmas: [], disciplinas: [], turma_disciplinas: [], alunos: [], escolas: [],
         sicep_avaliacoes: [], sicep_questoes: [], sicep_alternativas: [],
         sicep_layouts_leitura: [], sicep_resultados: [], sicep_ocr_scans: [],
+        habilidades_planejamento: [], parametro_divisoes: [], divisoes: [],
         avaliacoes: [], notas: [],
       };
       Object.entries({ ...padrao, ...novas }).forEach(([k, v]) => { tabelas[k] = structuredClone(v); });

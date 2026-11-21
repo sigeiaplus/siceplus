@@ -183,6 +183,9 @@ export async function salvarCache(usuarioId, dados) {
       recursos: dados.recursos,
     });
 
+    // Etapa 4B: habilidades do planejamento ficam no cache para a seleção funcionar offline.
+    poe('meta', 'habilidades', dados.habilidades || []);
+
     await pronto;
     return true;
   } catch (e) {
@@ -195,6 +198,8 @@ export async function salvarCache(usuarioId, dados) {
 export async function lerCache(usuarioId) {
   const meta = await ler('meta', usuarioId, 'cache');
   if (!meta || meta.esquema !== VERSAO_ESQUEMA || !meta.sessao || meta.sessao.usuario_id !== usuarioId) return null;
+
+  const habilidades = (await ler('meta', usuarioId, 'habilidades')) || [];
 
   const [turmas, disciplinas, professores, turma_disciplinas, alunos, avaliacoes, questoes, resultados] = await Promise.all(
     ['turmas', 'disciplinas', 'professores', 'turma_disciplinas', 'alunos', 'avaliacoes', 'questoes', 'resultados']
@@ -218,6 +223,7 @@ export async function lerCache(usuarioId) {
     db: {
       sessao: meta.sessao,
       turmas, disciplinas, professores, turma_disciplinas, alunos,
+      habilidades,
       avaliacoes: avaliacoesCompletas,
       resultados,
       scans: [], fila: [], erros: [],

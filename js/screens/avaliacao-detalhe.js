@@ -212,6 +212,8 @@ export default function avaliacaoDetalhe(params) {
 
   function pintar() {
     const prazo = store.prazoDe(av);
+    // Etapa 4B: só mostra a coluna quando há habilidade vinculada.
+    const comHabilidades = av.questoes.some((q) => q.habilidade_bncc);
 
     root.innerHTML = `
       <a class="row small muted" href="#/avaliacoes" style="text-decoration:none">
@@ -305,13 +307,14 @@ export default function avaliacaoDetalhe(params) {
         </div>
         <div style="overflow-x:auto">
           <table class="gab-table">
-            <thead><tr><th>Nº</th><th>Valor</th><th>Gabarito</th></tr></thead>
+            <thead><tr><th>Nº</th><th>Valor</th><th>Gabarito</th>${comHabilidades ? '<th>Habilidades</th>' : ''}</tr></thead>
             <tbody>
               ${av.questoes.map((q) => `
                 <tr>
                   <td>${q.numero}</td>
                   <td>${q.anulada ? '—' : fmtNota(q.valor)}</td>
                   <td class="g">${q.anulada ? 'anulada' : esc(q.gabarito)}</td>
+                  ${comHabilidades ? `<td class="mono xs">${esc(q.habilidade_bncc || '—')}</td>` : ''}
                 </tr>`).join('')}
             </tbody>
           </table>

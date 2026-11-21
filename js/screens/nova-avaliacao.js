@@ -52,6 +52,10 @@ export default function novaAvaliacao(params) {
       valor: Number(q.valor) || 0,
       gabarito: q.gabarito,
       anulada: !!q.anulada,
+      // Etapa 4B: códigos guardados em habilidade_bncc (separados por vírgula).
+      habilidades: store.codigosDeHabilidade(q.habilidade_bncc),
+      // Se a coluna não veio na leitura, não sobrescrever o que está na nuvem.
+      tocaHabilidade: Object.prototype.hasOwnProperty.call(q, 'habilidade_bncc'),
     }));
   }
 
@@ -60,11 +64,20 @@ export default function novaAvaliacao(params) {
 
   /* ---------------- Questões ---------------- */
 
+  function habilidadesJaEscolhidas(numero) {
+    const naLista = (st.questoes || []).find((q) => Number(q.numero) === Number(numero));
+    if (naLista) return [...(naLista.habilidades || [])];
+    return [...((st.habilidadesPorNumero || {})[numero] || [])];
+  }
+
   function questoesPadrao() {
     const n = Math.max(1, Math.min(store.MAX_QUESTOES, Number(st.num_questoes) || 1));
     const valor = Math.round(((Number(st.valor_total) || 10) / n) * 100) / 100;
     return Array.from({ length: n }, (_, i) => ({
       numero: i + 1, valor, enunciado: '', gabarito: null, anulada: false,
+      // Mudar a quantidade de questões não perde as habilidades já escolhidas dos mesmos números.
+      habilidades: habilidadesJaEscolhidas(i + 1),
+      tocaHabilidade: true,
     }));
   }
 
@@ -323,6 +336,7 @@ export default function novaAvaliacao(params) {
         </div>
 
         <div>
+          ${avisoHabilidades()}
           ${st.questoes.map((q) => `
             <div class="q-row ${q.anulada ? 'anulada' : ''}">
               <span class="q-num">${q.numero}</span>
@@ -349,6 +363,7 @@ export default function novaAvaliacao(params) {
                     ${q.anulada ? 'Reativar' : 'Anular'}
                   </button>` : ''}
                 </div>
+                ${blocoHabilidades(q)}
               </div>
             </div>`).join('')}
         </div>
@@ -373,6 +388,7 @@ export default function novaAvaliacao(params) {
           ${store.tem('prazo') ? `<div><span class="k">Prazo de correção</span><span class="v">${st.prazo_correcao ? fmtDataHora(st.prazo_correcao) : 'sem prazo'}</span></div>` : ''}
           <div><span class="k">Valor total</span><span class="v">${fmtNota(st.valor_total)} pontos</span></div>
           <div><span class="k">Questões</span><span class="v">${st.questoes.length} · ${st.num_alternativas} alternativas</span></div>
+          <div><span class="k">Habilidades</span><span class="v">${st.questoes.filter((q) => (q.habilidades || []).length).length} questão(ões) com habilidade</span></div>
           ${store.tem('faixas') ? `<div><span class="k">Faixas</span><span class="v">verde ≥ ${st.faixa_verde}% · amarelo ≥ ${st.faixa_amarelo}%</span></div>` : ''}
           <div><span class="k">SIDED+</span><span class="v">${st.integra_sided ? 'Nota será registrada' : 'Não integra'}</span></div>
         </div>
@@ -391,6 +407,181 @@ export default function novaAvaliacao(params) {
           </table>
         </div>
       </div>`;
+  }
+
+  /* ---------------- Render ---------------- */
+
+  /* ---------------- Habilidades (Etapa 4B) ---------------- */
+
+  const acharQuestao = (numero) => (st.questoes || []).find((q) => Number(q.numero) === Number(numero)) || null;
+
+  function vinculosSelecionados() {
+    return [...new Set(st.turmasSel.map((t) => st.vinculos[t]).filter(Boolean))];
+  }
+
+  function trimestreDaAvaliacao() {
+    const t = Number(st.trimestre);
+    return [1, 2, 3].includes(t) ? t : null;
+  }
+
+  function blocoHabilidades(q) {
+    const codigos = q.habilidades || [];
+    const chips = codigos.length
+      ? `<div class="chips">${codigos.map((cod) => {
+        const info = store.habilidadePorCodigo(cod);
+        const titulo = info?.descricao || 'Habilidade vinculada';
+        return `<button type="button" class="chip on" data-hab-remover="${q.numero}" data-codigo="${esc(cod)}" title="${esc(titulo)}">${esc(cod)} ${icon('close', 13)}</button>`;
+      }).join('')}</div>`
+      : '<span class="xs muted">Sem habilidade vinculada</span>';
+    return `
+      <div class="row wrap" style="gap:8px;align-items:center">
+        ${chips}
+        <button type="button" class="btn btn-ghost btn-sm" data-hab-abrir="${q.numero}">
+          ${icon('plus', 14)} Habilidades
+        </button>
+      </div>`;
+  }
+
+  function avisoHabilidades() {
+    const erro = store.erroDeHabilidades();
+    if (erro) {
+      return `<div class="alert warn">${icon('info', 16)}<span><strong>Habilidades indisponíveis agora.</strong> ${esc(erro)} As habilidades já vinculadas foram mantidas.</span></div>`;
+    }
+    if (!store.tem('habilidades')) {
+      return `<div class="alert y">${icon('info', 16)}<span>As habilidades do planejamento não estão disponíveis neste ambiente. As questões podem ser salvas sem habilidade.</span></div>`;
+    }
+    if (!store.habilidades().length) {
+      return `<div class="alert y">${icon('info', 16)}<span>Nenhuma habilidade cadastrada no planejamento para as suas turmas/disciplinas. As questões podem ser salvas sem habilidade.</span></div>`;
+    }
+    return '';
+  }
+
+  function abrirSeletorHabilidades(numero) {
+    const q = acharQuestao(numero);
+    if (!q) return;
+    if (!q.habilidades) q.habilidades = [];
+
+    const antes = [...q.habilidades];
+    const vinculos = vinculosSelecionados();
+    const trimestre = trimestreDaAvaliacao();
+    const erro = store.erroDeHabilidades();
+    let mostrarTodos = trimestre == null;
+    let busca = '';
+
+    const back = el('<div class="modal-back"><div class="modal" role="dialog" aria-modal="true" aria-label="Habilidades da questão"></div></div>');
+    const caixa = back.querySelector('.modal');
+    document.body.append(back);
+
+    const listaAtual = () => store.habilidadesDoContexto(vinculos, mostrarTodos ? null : trimestre);
+
+    function contextoDe(item) {
+      const faltam = vinculos.filter((v) => !item.vinculos.includes(v));
+      if (!faltam.length) return '';
+      const nomes = [...new Set(faltam.map((v) => store.turma(store.vinculo(v)?.turma_id)?.nome).filter(Boolean))];
+      return nomes.length ? `Só em ${nomes.join(', ')}` : '';
+    }
+
+    caixa.innerHTML = `
+      <div class="row between" style="align-items:flex-start">
+        <div>
+          <h2 style="margin:0">Habilidades · Questão ${numero}</h2>
+          <p class="xs muted" style="margin:2px 0 0">
+            ${trimestre ? `${trimestre}º trimestre · ` : ''}<span data-contador></span>
+          </p>
+        </div>
+        <button class="cf-btn dark" type="button" data-hab-fechar aria-label="Fechar">${icon('close', 18)}</button>
+      </div>
+      ${erro ? `<div class="alert warn">${icon('info', 16)}<span>${esc(erro)} As habilidades já vinculadas foram mantidas.</span></div>` : ''}
+      <div class="field">
+        <label class="label" for="hab-busca">Pesquisar</label>
+        <input id="hab-busca" class="input" type="search" placeholder="Código, descrição ou tema" data-hab-busca autocomplete="off" />
+      </div>
+      <label class="row small muted" style="gap:8px;align-items:center">
+        <input type="checkbox" data-hab-todos ${mostrarTodos ? 'checked' : ''} style="width:16px;height:16px;accent-color:#F2B600" />
+        Mostrar habilidades de todos os trimestres
+      </label>
+      <div style="max-height:46dvh;overflow-y:auto" data-hab-lista></div>
+      <div class="btn-group">
+        <button class="btn btn-outline" type="button" data-hab-cancelar>Cancelar</button>
+        <button class="btn btn-primary" type="button" data-hab-ok>Concluído</button>
+      </div>`;
+
+    const entrada = caixa.querySelector('[data-hab-busca]');
+    const lista = caixa.querySelector('[data-hab-lista]');
+    const contador = caixa.querySelector('[data-contador]');
+
+    function desenharContador() {
+      const n = q.habilidades.length;
+      contador.textContent = n ? `${n} habilidade(s) nesta questão` : 'Nenhuma habilidade nesta questão';
+    }
+
+    function desenharLista() {
+      const termo = busca.trim().toLowerCase();
+      const todas = listaAtual();
+      const itens = termo
+        ? todas.filter((h) => h.codigo.toLowerCase().includes(termo)
+          || h.descricao.toLowerCase().includes(termo)
+          || h.temas.some((t) => t.toLowerCase().includes(termo)))
+        : todas;
+
+      desenharContador();
+
+      if (!itens.length) {
+        lista.innerHTML = `<p class="small muted" style="padding:10px 0">${
+          todas.length ? 'Nenhuma habilidade corresponde à pesquisa.'
+            : (erro ? 'Nenhuma habilidade carregada. Você pode salvar as questões sem habilidade.'
+              : 'Nenhuma habilidade cadastrada para estas turmas/disciplinas e trimestre.')
+        }</p>`;
+        return;
+      }
+
+      lista.innerHTML = itens.map((h) => {
+        const sel = q.habilidades.includes(h.codigo);
+        const ctx = contextoDe(h);
+        const local = h.divisoes?.length
+          ? h.divisoes.join(' · ')
+          : (h.trimestre ? `${h.trimestre}º trimestre` : 'Trimestre não identificado');
+        return `
+          <button type="button" class="option" data-hab="${esc(h.codigo)}" aria-pressed="${sel}" style="margin-bottom:8px">
+            <span class="grow">
+              <span class="opt-title mono">${esc(h.codigo)}${sel ? ' ✓' : ''}</span>
+              <span class="opt-sub" style="display:block">${esc(h.descricao || 'Sem descrição')}</span>
+              <span class="xs muted" style="display:block;margin-top:2px">
+                ${esc(local)}${h.temas.length ? ' · ' + esc(h.temas.join(', ')) : ''}${ctx ? ' · ' + esc(ctx) : ''}
+              </span>
+            </span>
+            <span class="opt-mark"></span>
+          </button>`;
+      }).join('');
+
+      lista.querySelectorAll('[data-hab]').forEach((b) => {
+        b.addEventListener('click', () => {
+          const codigo = b.dataset.hab;
+          if (q.habilidades.includes(codigo)) q.habilidades = q.habilidades.filter((c) => c !== codigo);
+          else q.habilidades.push(codigo);
+          q.tocaHabilidade = true;
+          desenharLista();
+        });
+      });
+    }
+
+    const fechar = (descartar = false) => {
+      if (descartar) q.habilidades = antes;
+      back.remove();
+      pintar();
+    };
+
+    caixa.querySelector('[data-hab-fechar]').addEventListener('click', () => fechar(true));
+    caixa.querySelector('[data-hab-cancelar]').addEventListener('click', () => fechar(true));
+    caixa.querySelector('[data-hab-ok]').addEventListener('click', () => fechar(false));
+    entrada.addEventListener('input', () => { busca = entrada.value; desenharLista(); });
+    caixa.querySelector('[data-hab-todos]').addEventListener('change', (ev) => {
+      mostrarTodos = ev.target.checked;
+      desenharLista();
+    });
+    back.addEventListener('click', (ev) => { if (ev.target === back) fechar(true); });
+
+    desenharLista();
   }
 
   /* ---------------- Render ---------------- */
@@ -453,7 +644,26 @@ export default function novaAvaliacao(params) {
       campo.addEventListener(ev, () => {
         if (campo.type === 'checkbox') st[nome] = campo.checked;
         else st[nome] = campo.value;
-        if (['num_questoes', 'num_alternativas', 'valor_total'].includes(nome)) st.questoes = null;
+        if (['num_questoes', 'num_alternativas', 'valor_total'].includes(nome)) {
+          // Guarda as habilidades por número antes de regenerar as questões.
+          st.habilidadesPorNumero = {};
+          (st.questoes || []).forEach((q) => { st.habilidadesPorNumero[q.numero] = [...(q.habilidades || [])]; });
+          st.questoes = null;
+        }
+      });
+    });
+
+    root.querySelectorAll('[data-hab-abrir]').forEach((b) => {
+      b.addEventListener('click', () => abrirSeletorHabilidades(Number(b.dataset.habAbrir)));
+    });
+
+    root.querySelectorAll('[data-hab-remover]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const q = acharQuestao(Number(b.dataset.habRemover));
+        if (!q) return;
+        q.habilidades = (q.habilidades || []).filter((c) => c !== b.dataset.codigo);
+        q.tocaHabilidade = true;
+        pintar();
       });
     });
 
@@ -528,7 +738,20 @@ export default function novaAvaliacao(params) {
         num_alternativas: Number(st.num_alternativas),
         lancar_sided: st.integra_sided,
         faixas: { verde: Number(st.faixa_verde), amarelo: Number(st.faixa_amarelo) },
-        questoes: st.questoes.map((q) => ({ ...q, valor: Number(q.valor) })),
+        questoes: st.questoes.map((q) => {
+          const codigos = [...new Set((q.habilidades || []).map((c) => String(c).trim()).filter(Boolean))];
+          const item = {
+            numero: q.numero,
+            enunciado: q.enunciado || '',
+            valor: Number(q.valor),
+            gabarito: q.gabarito,
+            anulada: !!q.anulada,
+          };
+          // Códigos separados por vírgula em sicep_questoes.habilidade_bncc.
+          if (codigos.length) item.habilidade_bncc = codigos.join(',');
+          else if (q.tocaHabilidade) item.habilidade_bncc = null; // desvinculou de propósito
+          return item;
+        }),
         aplicacoes: st.turmasSel.map((turmaId) => {
           const v = store.vinculo(st.vinculos[turmaId]);
           return {

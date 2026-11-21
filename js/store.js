@@ -37,6 +37,8 @@ const vazio = () => ({
   turma_disciplinas: [],
   alunos: [],
   avaliacoes: [],
+  // Habilidades do planejamento (SIDED+), por vínculo turma × disciplina.
+  habilidades: [],
   resultados: [],
   scans: [],
   fila: [],
@@ -46,7 +48,9 @@ const vazio = () => ({
 let db = vazio();
 let estado = 'carregando'; // carregando | sem-config | sem-sessao | erro | pronto
 let erro = null;
-let recursos = { prazo: false, faixas: false, anulada: false, situacao: false, turma_disciplina: false, trimestre: false };
+let recursos = { prazo: false, faixas: false, anulada: false, situacao: false, turma_disciplina: false, trimestre: false, habilidade_bncc: false, habilidades: false };
+// Motivo legível quando a leitura das habilidades falhou (RLS, tabela ausente, rede).
+let erroHabilidadesMsg = null;
 let origem = 'nuvem'; // nuvem | cache — de onde vieram os dados em memória
 let cacheEm = null;   // ISO da última cópia local usada/gravada
 let motivoCache = null;
@@ -168,12 +172,35 @@ export async function iniciar() {
     try {
       const novosRecursos = await comLimite(nuvem.detectarRecursos(), LIMITE_NUVEM_MS);
       const ctx = await comLimite(nuvem.carregarContexto(), LIMITE_NUVEM_MS);
+      // Etapa 4B: habilidades do planejamento para os vínculos do professor.
+      // Falha aqui NÃO derruba o app nem apaga as habilidades já carregadas.
+      let habilidades = [];
+      let falhaHabilidades = null;
+      try {
+        const pacote = await comLimite(
+          nuvem.carregarHabilidades(ctx.turma_disciplinas.map((v) => v.id)),
+          LIMITE_NUVEM_MS
+        );
+        habilidades = pacote.habilidades || [];
+      } catch (e) {
+        falhaHabilidades = e;
+      }
+      if (falhaHabilidades) {
+        console.warn('[SICEP+] habilidades indisponíveis, mantendo as já carregadas:', falhaHabilidades.message);
+        habilidades = db.habilidades || [];
+        // Reabriu o app agora: a memória está vazia, mas a cópia local tem a última lista boa.
+        if (!habilidades.length) {
+          const copia = await offline.lerCache(usuarioId).catch(() => null);
+          habilidades = copia?.db?.habilidades || [];
+        }
+      }
       const [avs, ress] = await comLimite(Promise.all([
         nuvem.carregarAvaliacoes(remota.usuario_id, novosRecursos),
         nuvem.carregarResultados(remota.usuario_id),
       ]), LIMITE_NUVEM_MS);
-      recursos = novosRecursos;
-      db = montar(ctx, avs, ress);
+      recursos = { ...novosRecursos, habilidades: !falhaHabilidades || habilidades.length > 0 };
+      erroHabilidadesMsg = falhaHabilidades ? falhaHabilidades.message : null;
+      db = montar(ctx, avs, ress, habilidades);
       estado = 'pronto';
       erro = null;
       origem = 'nuvem';
@@ -197,6 +224,7 @@ export async function iniciar() {
     estado = 'pronto';
     erro = null;
     origem = 'cache';
+    erroHabilidadesMsg = null;
     cacheEm = copia.atualizado_em;
     motivoCache = falhaNuvem?.message || null;
     await aplicarFilaNoEstado();
@@ -231,6 +259,7 @@ async function gravarCacheLocal() {
     professores: db.professores,
     turma_disciplinas: db.turma_disciplinas,
     alunos: db.alunos,
+    habilidades: db.habilidades,
     // Avaliação ainda na fila (pendente/enviando/erro) vive na fila, não aqui — e é reaplicada ao abrir.
     avaliacoes: db.avaliacoes.filter((a) => !a.sync || a.sync === 'sincronizado').map(({ sync, erro_sync, ...resto }) => resto),
     // A cópia local só recebe o que o servidor já confirmou. Resultado ainda na fila
@@ -250,7 +279,7 @@ export async function recarregar() {
   return iniciar();
 }
 
-function montar(ctx, avs, resultados) {
+function montar(ctx, avs, resultados, habilidades = []) {
   const sessao = {
     usuario_id: ctx.sessao.usuario_id,
     professor_id: ctx.sessao.professor_id,
@@ -326,6 +355,7 @@ function montar(ctx, avs, resultados) {
     professores: ctx.professores,
     turma_disciplinas: ctx.turma_disciplinas,
     alunos: ctx.alunos,
+    habilidades,
     avaliacoes,
     resultados: resultadosMapeados,
     scans: [],
@@ -442,6 +472,70 @@ export function alunosDaTurma(turmaId) {
     .sort((a, b) => a.nome_completo.localeCompare(b.nome_completo, 'pt-BR'));
 }
 
+/* ---------------- Habilidades do planejamento (Etapa 4B) ---------------- */
+
+/** Habilidades carregadas do planejamento (todas as turmas/disciplinas do professor). */
+export function habilidades() { return db.habilidades || []; }
+
+/** Motivo legível quando a última leitura das habilidades falhou (null quando tudo certo). */
+export function erroDeHabilidades() { return erroHabilidadesMsg; }
+
+/** "EF01,EF02" -> ['EF01', 'EF02'] (sem vazios e sem repetição). */
+export function codigosDeHabilidade(valor) {
+  const texto = nuvem.normalizarCodigos(valor);
+  return texto ? texto.split(',') : [];
+}
+
+/**
+ * Habilidades disponíveis para os vínculos turma × disciplina selecionados.
+ * Com `trimestre`, usa a ordem_divisao vinda do planejamento; sem ele, devolve tudo.
+ * O mesmo código presente em várias turmas vira uma entrada só, com todos os vínculos.
+ */
+export function habilidadesDoContexto(turmaDisciplinaIds, trimestre = null) {
+  const ids = new Set((turmaDisciplinaIds || []).filter(Boolean).map(String));
+  if (!ids.size) return [];
+  const ordem = (t) => (t == null ? 99 : Number(t));
+  const mapa = new Map();
+
+  (db.habilidades || []).forEach((h) => {
+    if (!ids.has(String(h.turma_disciplina_id))) return;
+    if (trimestre != null && h.trimestre != null && Number(h.trimestre) !== Number(trimestre)) return;
+
+    const atual = mapa.get(h.codigo);
+    if (!atual) {
+      mapa.set(h.codigo, {
+        codigo: h.codigo,
+        descricao: h.descricao || '',
+        temas: [...(h.temas || [])],
+        trimestre: h.trimestre ?? null,
+        divisoes: h.divisao_nome ? [h.divisao_nome] : [],
+        vinculos: [h.turma_disciplina_id],
+      });
+      return;
+    }
+    if (!atual.vinculos.includes(h.turma_disciplina_id)) atual.vinculos.push(h.turma_disciplina_id);
+    if (h.divisao_nome && !atual.divisoes.includes(h.divisao_nome)) atual.divisoes.push(h.divisao_nome);
+    (h.temas || []).forEach((t) => { if (!atual.temas.includes(t)) atual.temas.push(t); });
+    if (atual.trimestre == null && h.trimestre != null) atual.trimestre = h.trimestre;
+  });
+
+  return [...mapa.values()].sort((a, b) => ordem(a.trimestre) - ordem(b.trimestre) || a.codigo.localeCompare(b.codigo, 'pt-BR'));
+}
+
+/** Descrição/temas de um código (para os chips), juntando os contextos carregados. */
+export function habilidadePorCodigo(codigo) {
+  const alvo = String(codigo || '').trim();
+  const achadas = (db.habilidades || []).filter((h) => h.codigo === alvo);
+  if (!achadas.length) return null;
+  return {
+    codigo: alvo,
+    descricao: achadas[0].descricao || '',
+    temas: [...new Set(achadas.flatMap((h) => h.temas || []))],
+    trimestre: achadas.find((h) => h.trimestre != null)?.trimestre ?? null,
+    divisoes: [...new Set(achadas.map((h) => h.divisao_nome).filter(Boolean))],
+  };
+}
+
 /* ---------------- Avaliações ---------------- */
 
 export function avaliacoes() {
@@ -540,6 +634,7 @@ export async function criarAvaliacao(dados) {
       num_alternativas: numAlternativas,
       gabarito: q.gabarito,
       anulada: !!q.anulada,
+      habilidade_bncc: nuvem.normalizarCodigos(q.habilidade_bncc),
       ...(q.alternativas ? { alternativas: q.alternativas } : {}),
     })),
     aplicacoes: dados.aplicacoes.map((a) => ({
@@ -643,14 +738,23 @@ export async function salvarAvaliacao(dados) {
       ...(recursos.faixas ? { faixa_verde: Number(dados.faixas.verde), faixa_amarela: Number(dados.faixas.amarelo) } : {}),
     };
 
+    // Habilidade: valor enviado manda (inclusive vazio, para desvincular); ausente
+    // na entrada preserva a que já está gravada — falha de carregamento não apaga vínculo.
+    const habilidadeDe = (q, atual) => {
+      if (q.habilidade_bncc === undefined) return atual?.habilidade_bncc ?? undefined;
+      return nuvem.normalizarCodigos(q.habilidade_bncc);
+    };
+
     // O id de cada questão existente é preservado (mesmo número = mesma linha na nuvem).
     const questoesEnvio = dados.questoes.map((q) => {
       const atual = (av.questoes || []).find((x) => Number(x.numero) === Number(q.numero));
+      const habilidade = habilidadeDe(q, atual);
       return {
         ...q,
         id: atual?.id || q.id || q.id_cliente || nuvem.novoUuid(),
         numero: Number(q.numero),
         valor: Number(q.valor),
+        ...(habilidade !== undefined ? { habilidade_bncc: habilidade } : {}),
         ...(!q.alternativas && atual?.alternativas ? { alternativas: atual.alternativas } : {}),
       };
     });
@@ -676,6 +780,7 @@ export async function salvarAvaliacao(dados) {
         num_alternativas: numAlternativas,
         gabarito: q.anulada ? null : q.gabarito,
         anulada: !!q.anulada,
+        habilidade_bncc: q.habilidade_bncc ?? null,
         ...(q.alternativas ? { alternativas: q.alternativas } : {}),
       })),
       aplicacoes: dados.aplicacoes.map((a) => {
