@@ -11,6 +11,7 @@
    ============================================================ */
 
 import * as nuvem from './nuvem.js';
+import * as offline from './offline/db.js';
 import { configurado, CONFIG } from './config.js';
 
 export const ALTERNATIVAS = ['A', 'B', 'C', 'D', 'E'];
@@ -45,10 +46,84 @@ let db = vazio();
 let estado = 'carregando'; // carregando | sem-config | sem-sessao | erro | pronto
 let erro = null;
 let recursos = { prazo: false, faixas: false, anulada: false, situacao: false, turma_disciplina: false, trimestre: false };
+let origem = 'nuvem'; // nuvem | cache — de onde vieram os dados em memória
+let cacheEm = null;   // ISO da última cópia local usada/gravada
+let motivoCache = null;
+
+// Sessão offline: vale por este tempo a partir do login (não renova sozinha).
+// Passou disso, é preciso entrar de novo com internet.
+export const VALIDADE_SESSAO_MS = 14 * 24 * 60 * 60 * 1000;
+// Sem resposta da nuvem neste prazo, o app abre com a cópia local.
+const LIMITE_NUVEM_MS = 20000;
+
+function comLimite(promessa, ms) {
+  let t;
+  const limite = new Promise((_, falha) => { t = setTimeout(() => falha(new Error('A nuvem demorou demais para responder.')), ms); });
+  return Promise.race([promessa, limite]).finally(() => clearTimeout(t));
+}
 
 // Precisão de nota: até 10 casas decimais (0,25 não vira 0,3).
 const arred = (n) => Math.round((Number(n) || 0) * 1e10) / 1e10;
 const hojeISO = () => new Date().toISOString().slice(0, 10);
+
+/* ---------------- Sessão persistida (reabrir offline) ---------------- */
+
+function gravarSessaoNoNavegador(usuario, professor) {
+  sessionStorage.setItem('ded_user', JSON.stringify(usuario));
+  sessionStorage.setItem('prof_data', JSON.stringify(professor));
+}
+
+// Só o necessário para o app funcionar: nunca senha, hash, CPF ou e-mail.
+function sessaoMinima(usuario, professor, criadoEm = Date.now()) {
+  return {
+    usuario_id: usuario.id,
+    usuario: { id: usuario.id, nome: usuario.nome || null, role: usuario.role || null, escola_id: usuario.escola_id || null },
+    professor: professor ? { id: professor.id, nome: professor.nome || null, escola_id: professor.escola_id || null } : null,
+    criado_em: criadoEm,
+    expira_em: criadoEm + VALIDADE_SESSAO_MS,
+  };
+}
+
+/** Apaga sessão e cópia local do usuário (logout ou sessão vencida). */
+async function esquecerLocal(usuarioId) {
+  try { sessionStorage.removeItem('ded_user'); sessionStorage.removeItem('prof_data'); } catch (e) { /* ignora */ }
+  try { await offline.apagarSessao(); } catch (e) { /* ignora */ }
+  try { if (usuarioId != null) await offline.limparCache(usuarioId); } catch (e) { /* ignora */ }
+}
+
+/**
+ * Garante que a sessão do navegador exista e esteja dentro da validade.
+ * - Sem sessão do navegador (app foi fechado): restaura a sessão persistida, se ainda valer.
+ * - Sessão persistida vencida: apaga sessão e cópia local; o usuário precisa entrar de novo.
+ * Nunca cria sessão nova: só login online (entrar) faz isso.
+ */
+async function conferirSessaoLocal() {
+  let persistida = null;
+  try { persistida = await offline.lerSessao(); } catch (e) { persistida = null; }
+
+  if (persistida && (!persistida.expira_em || Date.now() >= persistida.expira_em || !persistida.usuario?.id)) {
+    await esquecerLocal(persistida.usuario_id);
+    return;
+  }
+
+  if (nuvem.sessaoRemota()) return; // sessão do navegador já existe e não está vencida
+  if (!persistida) return;
+
+  try { gravarSessaoNoNavegador(persistida.usuario, persistida.professor); } catch (e) { /* ignora */ }
+}
+
+/** Primeira abertura com sessão do navegador mas sem registro persistido (ex.: sessão anterior a esta versão). */
+async function garantirSessaoPersistida(remota) {
+  try {
+    const atual = await offline.lerSessao();
+    if (atual && atual.usuario_id === remota.usuario_id) return;
+    const usuario = JSON.parse(sessionStorage.getItem('ded_user') || 'null');
+    const prof = JSON.parse(sessionStorage.getItem('prof_data') || 'null');
+    if (!usuario?.id) return;
+    await offline.limparCacheDeOutros(usuario.id);
+    await offline.gravarSessao(sessaoMinima(usuario, prof));
+  } catch (e) { /* ignora */ }
+}
 
 /* ---------------- Inicialização ---------------- */
 
@@ -61,6 +136,8 @@ export async function iniciar() {
     return { estado, erro: null };
   }
 
+  await conferirSessaoLocal();
+
   const remota = nuvem.sessaoRemota();
   if (!remota) {
     estado = 'sem-sessao';
@@ -68,24 +145,86 @@ export async function iniciar() {
   }
 
   estado = 'carregando';
-  try {
-    recursos = await nuvem.detectarRecursos();
-    const ctx = await nuvem.carregarContexto();
-    const [avs, ress] = await Promise.all([
-      nuvem.carregarAvaliacoes(remota.usuario_id, recursos),
-      nuvem.carregarResultados(remota.usuario_id),
-    ]);
-    db = montar(ctx, avs, ress);
+  const usuarioId = remota.usuario_id;
+  let falhaNuvem = null;
+
+  // Sem internet declarada pelo navegador: nem tenta a nuvem, vai direto para a cópia local.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    falhaNuvem = new Error('Sem conexão com a internet.');
+  } else {
+    try {
+      const novosRecursos = await comLimite(nuvem.detectarRecursos(), LIMITE_NUVEM_MS);
+      const ctx = await comLimite(nuvem.carregarContexto(), LIMITE_NUVEM_MS);
+      const [avs, ress] = await comLimite(Promise.all([
+        nuvem.carregarAvaliacoes(remota.usuario_id, novosRecursos),
+        nuvem.carregarResultados(remota.usuario_id),
+      ]), LIMITE_NUVEM_MS);
+      recursos = novosRecursos;
+      db = montar(ctx, avs, ress);
+      estado = 'pronto';
+      erro = null;
+      origem = 'nuvem';
+      motivoCache = null;
+      await garantirSessaoPersistida(remota);
+      await gravarCacheLocal();
+      return { estado, erro: null, recursos, origem };
+    } catch (e) {
+      falhaNuvem = e;
+    }
+  }
+
+  // A nuvem falhou: nunca apaga o que já existe localmente.
+  console.warn('[SICEP+] Nuvem indisponível, tentando a cópia local:', falhaNuvem?.message);
+
+  const copia = await offline.lerCache(usuarioId).catch(() => null);
+  if (copia) {
+    db = copia.db;
+    recursos = { ...recursos, ...copia.recursos };
     estado = 'pronto';
     erro = null;
-    return { estado, erro: null, recursos };
-  } catch (e) {
-    console.error('[SICEP+] Falha ao carregar dados reais:', e);
-    estado = 'erro';
-    erro = e.message;
-    db = vazio();
-    return { estado, erro: e.message };
+    origem = 'cache';
+    cacheEm = copia.atualizado_em;
+    motivoCache = falhaNuvem?.message || null;
+    return { estado, erro: null, recursos, origem };
   }
+
+  // Sem cópia gravada, mas os dados deste mesmo usuário ainda estão na memória (ex.: recarregar sem rede).
+  if (db.sessao && db.sessao.usuario_id === usuarioId) {
+    estado = 'pronto';
+    erro = null;
+    origem = 'cache';
+    motivoCache = falhaNuvem?.message || null;
+    return { estado, erro: null, recursos, origem };
+  }
+
+  console.error('[SICEP+] Falha ao carregar dados reais:', falhaNuvem);
+  estado = 'erro';
+  erro = falhaNuvem?.message || 'Falha ao carregar os dados.';
+  db = vazio();
+  return { estado, erro };
+}
+
+/** Grava no IndexedDB a cópia dos dados atuais (somente quando vieram da nuvem). */
+async function gravarCacheLocal() {
+  if (origem !== 'nuvem' || !db.sessao) return false;
+  const ok = await offline.salvarCache(db.sessao.usuario_id, {
+    sessao: db.sessao,
+    recursos,
+    turmas: db.turmas,
+    disciplinas: db.disciplinas,
+    professores: db.professores,
+    turma_disciplinas: db.turma_disciplinas,
+    alunos: db.alunos,
+    avaliacoes: db.avaliacoes,
+    resultados: db.resultados,
+  });
+  if (ok) cacheEm = new Date().toISOString();
+  return ok;
+}
+
+// Chamado depois de gravações bem-sucedidas na nuvem, para a cópia local não ficar velha.
+function atualizarCacheLocal() {
+  gravarCacheLocal().catch(() => { /* cópia local é auxiliar */ });
 }
 
 export async function recarregar() {
@@ -183,6 +322,11 @@ export function sessao() { return db.sessao; }
 export function autenticado() { return Boolean(db.sessao) && estado === 'pronto'; }
 export function estadoAtual() { return estado; }
 export function erroDeConexao() { return erro; }
+/** 'nuvem' (dados recém-carregados do Supabase) ou 'cache' (cópia local, sem conexão com a nuvem). */
+export function origemDados() { return origem; }
+export function dadosEmCache() { return origem === 'cache'; }
+export function cacheAtualizadoEm() { return cacheEm; }
+export function motivoDoCache() { return motivoCache; }
 export function recursosDisponiveis() { return recursos; }
 export function tem(recurso) { return Boolean(recursos[recurso]); }
 export function situacaoSuportada(situacao) {
@@ -198,6 +342,11 @@ const PERFIS_PERMITIDOS = ['professor', 'admin', 'diretor', 'especialista', 'sec
 export async function entrar(identificador, senha) {
   const login = String(identificador || '').trim();
   if (!login || !senha) return { ok: false, erro: 'Preencha o acesso e a senha.' };
+
+  // Login novo exige internet: offline só reabre uma sessão que já foi autenticada.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { ok: false, erro: 'Sem internet. Para entrar pela primeira vez é preciso estar conectado.' };
+  }
 
   let usuario = null;
   try {
@@ -218,25 +367,34 @@ export async function entrar(identificador, senha) {
   }
 
   try {
-    sessionStorage.setItem('ded_user', JSON.stringify(usuario));
-    sessionStorage.setItem('prof_data', JSON.stringify(professor));
+    gravarSessaoNoNavegador(usuario, professor);
   } catch (e) {
     return { ok: false, erro: 'O navegador bloqueou o armazenamento da sessão.' };
   }
+
+  // Login novo: outro usuário no mesmo aparelho perde a cópia local; a validade recomeça agora.
+  await offline.limparCacheDeOutros(usuario.id);
+  await offline.gravarSessao(sessaoMinima(usuario, professor));
 
   const r = await iniciar();
   if (r.estado !== 'pronto') {
     return { ok: false, erro: r.erro || 'Não foi possível carregar seus dados agora.', estado: r.estado };
   }
+  if (r.origem === 'cache') {
+    // Login aceito pela nuvem, mas os dados vieram da cópia local: avisa em vez de fingir sincronização.
+    return { ok: true, aviso: 'Entrou, mas a nuvem não respondeu: mostrando os dados salvos neste aparelho.' };
+  }
   return { ok: true };
 }
 
-export function sair() {
+export async function sair() {
+  const usuarioId = db.sessao?.usuario_id ?? nuvem.sessaoRemota()?.usuario_id ?? null;
   try {
-    sessionStorage.removeItem('ded_user');
-    sessionStorage.removeItem('prof_data');
-  } catch (e) { /* ignora */ }
-  location.reload();
+    // Sair apaga a sessão e a cópia local deste usuário (aparelho pode ser compartilhado).
+    await Promise.race([esquecerLocal(usuarioId), new Promise((ok) => setTimeout(ok, 3000))]);
+  } finally {
+    location.reload();
+  }
 }
 
 /* ---------------- Consultas acadêmicas ---------------- */
@@ -290,7 +448,13 @@ export function nomeDisciplina(av) {
 }
 
 export async function criarAvaliacao(dados) {
+  // Ids gerados aqui e guardados em `dados`: repetir a chamada com o mesmo objeto
+  // reaproveita os mesmos ids e a nuvem não cria nada em dobro.
+  if (!dados.id_cliente) dados.id_cliente = nuvem.novoUuid();
+  dados.questoes.forEach((q) => { if (!q.id_cliente) q.id_cliente = nuvem.novoUuid(); });
+
   const remota = await nuvem.criarAvaliacao({
+    id: dados.id_cliente,
     titulo: dados.titulo,
     descricao: dados.descricao,
     disciplina: dados.disciplina,
@@ -299,7 +463,7 @@ export async function criarAvaliacao(dados) {
     lancar_sided: !!dados.lancar_sided,
     turmas_ids: dados.aplicacoes.map((a) => a.turma_id),
     num_alternativas: Number(dados.num_alternativas),
-    questoes: dados.questoes,
+    questoes: dados.questoes.map((q) => ({ ...q, id: q.id || q.id_cliente })),
     prazo_correcao: recursos.prazo ? dados.prazo_correcao : null,
     trimestre: recursos.trimestre ? (Number(dados.trimestre) || null) : null,
     faixas: recursos.faixas ? dados.faixas : null,
@@ -320,7 +484,8 @@ export async function criarAvaliacao(dados) {
     status: 'pronta',
     layout: { codigo_caderno: 'SICEP-A', versao: 1, num_alternativas: Number(dados.num_alternativas) },
     criado_em: hojeISO(),
-    questoes: dados.questoes.map((q) => ({
+    questoes: dados.questoes.map((q, i) => ({
+      id: remota.questoes?.find((x) => Number(x.numero) === Number(q.numero))?.id || q.id || q.id_cliente || null,
       numero: q.numero,
       enunciado: q.enunciado || '',
       valor: Number(q.valor),
@@ -339,6 +504,7 @@ export async function criarAvaliacao(dados) {
   };
 
   db.avaliacoes.unshift(local);
+  atualizarCacheLocal();
   return local;
 }
 
@@ -413,6 +579,7 @@ export async function excluirAvaliacao(id) {
 
   db.avaliacoes = db.avaliacoes.filter((a) => a.id !== id);
   db.resultados = db.resultados.filter((r) => r.avaliacao_id !== id);
+  atualizarCacheLocal();
   return { ok: true, resultados };
 }
 
@@ -502,7 +669,7 @@ export function progresso(av, turmaId) {
 export async function salvarResultado({
   avaliacao: av, aplicacao: apl, alunoId, respostas = {},
   confianca = null, situacao = 'normal', imagemRef = null, observacao = '', revisado = false,
-  substituir = false,
+  substituir = false, resultadoId = null,
 }) {
   if (!av || !apl) return { ok: false, erro: 'Avaliação ou turma não identificada.' };
   if (!situacaoSuportada(situacao)) {
@@ -541,7 +708,7 @@ export async function salvarResultado({
     if (existente) {
       await nuvem.api(`sicep_resultados?id=eq.${existente.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
     } else {
-      const criado = await nuvem.salvarResultado(payload);
+      const criado = await nuvem.salvarResultado({ ...payload, id: resultadoId || nuvem.novoUuid() });
       id = criado.id;
     }
     if (imagemRef) {
@@ -553,6 +720,9 @@ export async function salvarResultado({
       });
     }
   } catch (e) {
+    if (e.codigo === 'RESULTADO_DUPLICADO') {
+      return { ok: false, erro: 'Já existe um resultado deste aluno nesta avaliação (gravado em outro momento ou aparelho). Recarregue os dados para vê-lo.' };
+    }
     return { ok: false, erro: 'Falha ao gravar na nuvem: ' + e.message };
   }
 
@@ -583,6 +753,7 @@ export async function salvarResultado({
 
   if (existente) Object.assign(existente, local);
   else db.resultados.unshift(local);
+  atualizarCacheLocal();
 
   return {
     ok: true,
@@ -622,6 +793,7 @@ export async function confirmarResultado(id) {
   }
   r.status = 'confirmado';
   if (recursos.revisado) r.revisado_em = agora;
+  atualizarCacheLocal();
   return { ok: true };
 }
 
@@ -645,6 +817,7 @@ export async function excluirResultado(id) {
   } catch (e) { /* tabela opcional */ }
 
   db.resultados = db.resultados.filter((x) => x.id !== r.id);
+  atualizarCacheLocal();
   return { ok: true, enviado: Boolean(r.enviado_em) };
 }
 
@@ -682,6 +855,7 @@ export async function definirTrimestre(avaliacaoId, trimestre) {
     return { ok: false, erro: 'Falha ao salvar o trimestre: ' + e.message };
   }
   av.trimestre = tri;
+  atualizarCacheLocal();
   return { ok: true };
 }
 
@@ -795,6 +969,7 @@ export async function enviarAoSided(avaliacaoId, turmaId, resultadoIds = null) {
     if (alvoAv && (alvoAv.turmas_ids || []).length <= 1) alvoAv.sided_avaliacao_id = ultimoSided;
   }
 
+  if (enviadosIds.length) atualizarCacheLocal();
   return { ok: falhas.length === 0, enviados: enviadosIds.length, falhas, aviso };
 }
 
@@ -806,5 +981,6 @@ export function erros() { return [...db.erros]; }
 export function estadoSincronizacao() {
   if (estado !== 'pronto') return { classe: 'offline', texto: 'Offline' };
   if (!navigator.onLine) return { classe: 'offline', texto: 'Offline' };
+  if (origem === 'cache') return { classe: 'offline', texto: 'Dados salvos' };
   return { classe: '', texto: 'Sincronizado' };
 }
