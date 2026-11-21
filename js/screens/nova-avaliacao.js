@@ -463,16 +463,14 @@ export default function novaAvaliacao(params) {
 
     const antes = [...q.habilidades];
     const vinculos = vinculosSelecionados();
-    const trimestre = trimestreDaAvaliacao();
     const erro = store.erroDeHabilidades();
-    let mostrarTodos = trimestre == null;
     let busca = '';
 
     const back = el('<div class="modal-back"><div class="modal" role="dialog" aria-modal="true" aria-label="Habilidades da questão"></div></div>');
     const caixa = back.querySelector('.modal');
     document.body.append(back);
 
-    const listaAtual = () => store.habilidadesDoContexto(vinculos, mostrarTodos ? null : trimestre);
+    const listaAtual = () => store.habilidadesDoContexto(vinculos);
 
     function contextoDe(item) {
       const faltam = vinculos.filter((v) => !item.vinculos.includes(v));
@@ -486,7 +484,7 @@ export default function novaAvaliacao(params) {
         <div>
           <h2 style="margin:0">Habilidades · Questão ${numero}</h2>
           <p class="xs muted" style="margin:2px 0 0">
-            ${trimestre ? `${trimestre}º trimestre · ` : ''}<span data-contador></span>
+            <span data-contador></span>
           </p>
         </div>
         <button class="cf-btn dark" type="button" data-hab-fechar aria-label="Fechar">${icon('close', 18)}</button>
@@ -496,10 +494,6 @@ export default function novaAvaliacao(params) {
         <label class="label" for="hab-busca">Pesquisar</label>
         <input id="hab-busca" class="input" type="search" placeholder="Código, descrição ou tema" data-hab-busca autocomplete="off" />
       </div>
-      <label class="row small muted" style="gap:8px;align-items:center">
-        <input type="checkbox" data-hab-todos ${mostrarTodos ? 'checked' : ''} style="width:16px;height:16px;accent-color:#F2B600" />
-        Mostrar habilidades de todos os trimestres
-      </label>
       <div style="max-height:46dvh;overflow-y:auto" data-hab-lista></div>
       <div class="btn-group">
         <button class="btn btn-outline" type="button" data-hab-cancelar>Cancelar</button>
@@ -530,7 +524,7 @@ export default function novaAvaliacao(params) {
         lista.innerHTML = `<p class="small muted" style="padding:10px 0">${
           todas.length ? 'Nenhuma habilidade corresponde à pesquisa.'
             : (erro ? 'Nenhuma habilidade carregada. Você pode salvar as questões sem habilidade.'
-              : 'Nenhuma habilidade cadastrada para estas turmas/disciplinas e trimestre.')
+              : 'Nenhuma habilidade cadastrada para estas turmas/disciplinas.')
         }</p>`;
         return;
       }
@@ -575,10 +569,6 @@ export default function novaAvaliacao(params) {
     caixa.querySelector('[data-hab-cancelar]').addEventListener('click', () => fechar(true));
     caixa.querySelector('[data-hab-ok]').addEventListener('click', () => fechar(false));
     entrada.addEventListener('input', () => { busca = entrada.value; desenharLista(); });
-    caixa.querySelector('[data-hab-todos]').addEventListener('change', (ev) => {
-      mostrarTodos = ev.target.checked;
-      desenharLista();
-    });
     back.addEventListener('click', (ev) => { if (ev.target === back) fechar(true); });
 
     desenharLista();

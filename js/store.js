@@ -494,7 +494,6 @@ export function codigosDeHabilidade(valor) {
 export function habilidadesDoContexto(turmaDisciplinaIds, trimestre = null) {
   const ids = new Set((turmaDisciplinaIds || []).filter(Boolean).map(String));
   if (!ids.size) return [];
-  const ordem = (t) => (t == null ? 99 : Number(t));
   const mapa = new Map();
 
   (db.habilidades || []).forEach((h) => {
@@ -519,7 +518,8 @@ export function habilidadesDoContexto(turmaDisciplinaIds, trimestre = null) {
     if (atual.trimestre == null && h.trimestre != null) atual.trimestre = h.trimestre;
   });
 
-  return [...mapa.values()].sort((a, b) => ordem(a.trimestre) - ordem(b.trimestre) || a.codigo.localeCompare(b.codigo, 'pt-BR'));
+  // Todos os trimestres juntos, em ordem alfabética direta pelo código.
+  return [...mapa.values()].sort((a, b) => a.codigo.localeCompare(b.codigo, 'pt-BR', { numeric: true }));
 }
 
 /** Descrição/temas de um código (para os chips), juntando os contextos carregados. */
