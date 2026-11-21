@@ -119,6 +119,30 @@ export function syncResultadoBadge(sync) {
   return '';
 }
 
+/**
+ * Situação de uma avaliação: criada neste aparelho e ainda fora da nuvem (pendente) ou já na nuvem
+ * (sincronizada). Avaliação vinda da nuvem não tem marca `sync` e conta como sincronizada.
+ */
+export function syncAvaliacaoBadge(sync) {
+  if (sync === 'pendente') return badge('Pendente de sincronização', 'warn');
+  if (sync === 'sincronizando') return badge('Sincronizando…', 'warn');
+  if (sync === 'erro') return badge('Erro na sincronização', 'err');
+  if (sync === 'conflito') return badge('Conflito de versões', 'err');
+  return badge('Sincronizada', 'ok');
+}
+
+/**
+ * Refaz a tela quando o estado da fila muda (ex.: a internet voltou e a avaliação foi enviada),
+ * e para de escutar sozinha quando a tela sai do documento.
+ */
+export function reagirEnquantoVisivel(root, assinar, refazer) {
+  let jaFoiVista = false;
+  setTimeout(() => { jaFoiVista = root.isConnected; }, 0);
+  const cancelar = assinar(() => {
+    if (root.isConnected) { jaFoiVista = true; refazer(); } else if (jaFoiVista) cancelar();
+  });
+}
+
 export function badge(texto, tipo = '') {
   return `<span class="badge ${tipo}">${esc(texto)}</span>`;
 }

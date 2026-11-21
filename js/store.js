@@ -231,7 +231,8 @@ async function gravarCacheLocal() {
     professores: db.professores,
     turma_disciplinas: db.turma_disciplinas,
     alunos: db.alunos,
-    avaliacoes: db.avaliacoes,
+    // Avaliação ainda na fila (pendente/enviando/erro) vive na fila, não aqui — e é reaplicada ao abrir.
+    avaliacoes: db.avaliacoes.filter((a) => !a.sync || a.sync === 'sincronizado').map(({ sync, erro_sync, ...resto }) => resto),
     // A cópia local só recebe o que o servidor já confirmou. Resultado ainda na fila
     // (pendente/sincronizando/erro) vive na fila, não aqui — e é reaplicado ao abrir.
     resultados: db.resultados.filter((r) => !r.sync || r.sync === 'sincronizado'),
@@ -465,14 +466,42 @@ export function nomeDisciplina(av) {
   return [...nomes].join(', ') || av?.disciplina || '—';
 }
 
+/** Avaliação criada/editada neste aparelho que ainda não chegou inteira à nuvem. */
+export function avaliacaoPendente(av) {
+  return Boolean(av?.sync) && av.sync !== 'sincronizado';
+}
+
+/** Avaliação que só existe neste aparelho (criada offline e ainda não confirmada pela nuvem). */
+export function avaliacaoSoLocal(av) {
+  return Boolean(av?.criada_local) && avaliacaoPendente(av);
+}
+
+const MSG_AVALIACAO_PENDENTE = 'Esta avaliação ainda não foi enviada à nuvem. Aguarde a sincronização para fazer esta operação.';
+const MSG_AVALIACAO_EM_CONFLITO = 'Esta avaliação tem um conflito de versões. Resolva o conflito antes de continuar.';
+const MSG_AVALIACAO_CRIACAO_PENDENTE = 'Esta avaliação foi criada neste aparelho e ainda não chegou à nuvem. Aguarde a sincronização para editá-la.';
+
+/**
+ * Cria a avaliação SEM depender da internet (6E).
+ * 1) Gera os ids no aparelho (avaliação e questões) e os guarda em `dados`: repetir a chamada
+ *    reaproveita os mesmos ids e nada é criado em dobro.
+ * 2) Grava na fila local (IndexedDB), numa só transação: item 'avaliacao' e depois item 'questoes'.
+ *    A partir daqui nada se perde, mesmo fechando o app.
+ * 3) Mostra na tela como pendente e tenta enviar agora (sem internet, não faz nada).
+ * Se a nuvem RECUSAR a avaliação (4xx), NADA é apagado: avaliação, questões e resultados já
+ * lidos continuam guardados e o erro fica visível para o professor tentar de novo ou descartar.
+ */
 export async function criarAvaliacao(dados) {
-  // Ids gerados aqui e guardados em `dados`: repetir a chamada com o mesmo objeto
-  // reaproveita os mesmos ids e a nuvem não cria nada em dobro.
   if (!dados.id_cliente) dados.id_cliente = nuvem.novoUuid();
   dados.questoes.forEach((q) => { if (!q.id_cliente) q.id_cliente = nuvem.novoUuid(); });
 
-  const remota = await nuvem.criarAvaliacao({
-    id: dados.id_cliente,
+  const usuarioId = db.sessao.usuario_id;
+  const id = dados.id_cliente;
+  const codigo = codigoLimpo(dados.codigo_caderno);
+  const numAlternativas = Number(dados.num_alternativas);
+  const trimestre = recursos.trimestre ? (Number(dados.trimestre) || null) : null;
+  const prazo = recursos.prazo ? dados.prazo_correcao : null;
+
+  const corpo = {
     titulo: dados.titulo,
     descricao: dados.descricao,
     disciplina: dados.disciplina,
@@ -480,57 +509,114 @@ export async function criarAvaliacao(dados) {
     data_aplicacao: dados.data_aplicacao,
     lancar_sided: !!dados.lancar_sided,
     turmas_ids: dados.aplicacoes.map((a) => a.turma_id),
-    num_alternativas: Number(dados.num_alternativas),
-    questoes: dados.questoes.map((q) => ({ ...q, id: q.id || q.id_cliente })),
-    prazo_correcao: recursos.prazo ? dados.prazo_correcao : null,
-    trimestre: recursos.trimestre ? (Number(dados.trimestre) || null) : null,
+    prazo_correcao: prazo,
+    trimestre,
     faixas: recursos.faixas ? dados.faixas : null,
-  }, db.sessao.usuario_id);
+  };
+  const questoesEnvio = dados.questoes.map((q) => ({ ...q, id: q.id || q.id_cliente }));
 
+  // Retrato completo guardado no aparelho (turmas, trimestre, questões, gabarito) até a nuvem confirmar.
   const local = {
-    id: remota.id,
+    id,
     titulo: dados.titulo,
     descricao: dados.descricao || '',
     disciplina: dados.disciplina || '',
     valor_total: Number(dados.valor_total),
     data_aplicacao: dados.data_aplicacao,
-    prazo_correcao: recursos.prazo ? dados.prazo_correcao : null,
-    trimestre: recursos.trimestre ? (Number(dados.trimestre) || null) : null,
+    prazo_correcao: prazo,
+    trimestre,
     faixas: recursos.faixas ? dados.faixas : { verde: 80, amarelo: 60 },
     modo: 'impresso',
     lancar_sided: !!dados.lancar_sided,
     status: 'pronta',
-    layout: { codigo_caderno: 'SICEP-A', versao: 1, num_alternativas: Number(dados.num_alternativas) },
+    turmas_ids: dados.aplicacoes.map((a) => a.turma_id),
+    layout: { codigo_caderno: codigo || 'SICEP-A', versao: 1, num_alternativas: numAlternativas },
     criado_em: hojeISO(),
-    questoes: dados.questoes.map((q, i) => ({
-      id: remota.questoes?.find((x) => Number(x.numero) === Number(q.numero))?.id || q.id || q.id_cliente || null,
+    questoes: questoesEnvio.map((q) => ({
+      id: q.id,
       numero: q.numero,
       enunciado: q.enunciado || '',
       valor: Number(q.valor),
-      num_alternativas: Number(dados.num_alternativas),
+      num_alternativas: numAlternativas,
       gabarito: q.gabarito,
       anulada: !!q.anulada,
+      ...(q.alternativas ? { alternativas: q.alternativas } : {}),
     })),
     aplicacoes: dados.aplicacoes.map((a) => ({
-      id: `${remota.id}:${a.turma_id}`,
+      id: `${id}:${a.turma_id}`,
       turma_id: a.turma_id,
       turma_disciplina_id: a.turma_disciplina_id,
       disciplina_id: a.disciplina_id,
       professor_id: a.professor_id,
       sided_avaliacao_id: null,
     })),
+    // Marca de origem: enquanto for verdadeira, a avaliação só existe neste aparelho.
+    criada_local: true,
   };
 
-  db.avaliacoes.unshift(local);
-  atualizarCacheLocal();
-  return local;
+  const itens = await filaSync.enfileirarAvaliacao(usuarioId, {
+    avaliacao_id: id,
+    avaliacao: corpo,
+    codigo_caderno: codigo,
+    escola_id: db.sessao.escola_id,
+    professor_id: db.sessao.professor_id,
+    questoes: questoesEnvio,
+    num_alternativas: numAlternativas,
+    local,
+  });
+
+  // Plano B: navegador sem IndexedDB. Só funciona online, como antes da 6E.
+  if (!itens) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      throw new Error('Sem internet e este navegador não permite guardar a avaliação no aparelho. Nada foi salvo.');
+    }
+    await nuvem.criarAvaliacao({ ...corpo, id, num_alternativas: numAlternativas, questoes: questoesEnvio }, usuarioId);
+    if (codigo) {
+      await nuvem.salvarLayoutCaderno({
+        avaliacaoId: id,
+        professorId: db.sessao.professor_id,
+        escolaId: db.sessao.escola_id,
+        codigo,
+        qtdQuestoes: dados.questoes.length,
+        qtdAlternativas: numAlternativas,
+      });
+    }
+    if (!db.avaliacoes.some((a) => a.id === id)) db.avaliacoes.unshift({ ...local });
+    atualizarCacheLocal();
+    return avaliacao(id);
+  }
+
+  // Tela: aparece já, marcada como pendente. O servidor ainda não confirmou nada.
+  if (!db.avaliacoes.some((a) => a.id === id)) db.avaliacoes.unshift({ ...local, sync: 'pendente' });
+  await atualizarEstadoDaFila();
+
+  // Tenta enviar agora, sem deixar a tela esperando uma rede lenta.
+  await esperarNoMaximo(sincronizarFila(), ESPERA_MAX_SALVAR_MS);
+
+  const doDispositivo = (await filaSync.listar(usuarioId)).filter((i) => i.avaliacao_id === id && i.tipo !== 'resultado');
+  const recusado = doDispositivo.find((i) => i.status === 'erro' && i.permanente);
+  if (recusado) {
+    // 6E: recusa NÃO apaga nada. A avaliação, as questões e os resultados já lidos
+    // continuam guardados neste aparelho (o professor decide tentar de novo ou descartar
+    // no painel de envios pendentes). O erro fica visível na tela e na fila.
+    const av = avaliacao(id);
+    if (av) { av.sync = 'erro'; av.erro_sync = recusado.erro || 'A nuvem recusou a avaliação.'; }
+    await atualizarEstadoDaFila();
+    return avaliacao(id);
+  }
+
+  return avaliacao(id);
 }
 
 /* ---------------- Editar / excluir avaliação ---------------- */
 
 const codigoLimpo = (codigo) => String(codigo || '').trim().slice(0, 50);
 
-/** Cria (sem dados.id) ou atualiza (com dados.id) a avaliação. */
+/**
+ * Cria (sem dados.id) ou atualiza (com dados.id) a avaliação.
+ * Edição (6F): funciona offline. A alteração entra na fila do aparelho com os ids das
+ * questões preservados (nada é apagado e recriado) e é enviada com detecção de conflito.
+ */
 export async function salvarAvaliacao(dados) {
   const codigo = codigoLimpo(dados.codigo_caderno);
   const numAlternativas = Number(dados.num_alternativas);
@@ -538,7 +624,11 @@ export async function salvarAvaliacao(dados) {
   if (dados.id) {
     const av = avaliacao(dados.id);
     if (!av) throw new Error('Avaliação não encontrada.');
-
+    // Avaliação criada offline e ainda não confirmada pela nuvem não tem versão remota para editar.
+    if (avaliacaoSoLocal(av)) throw new Error(MSG_AVALIACAO_CRIACAO_PENDENTE);
+    if (av.sync === 'conflito') throw new Error(MSG_AVALIACAO_EM_CONFLITO);
+    // Edição anterior recusada: ela continua guardada; salvar de novo substitui a edição pendente.
+    const travado = trimestreTravado(av);
     const patch = {
       titulo: dados.titulo,
       descricao: dados.descricao || null,
@@ -549,37 +639,110 @@ export async function salvarAvaliacao(dados) {
       turmas_ids: dados.aplicacoes.map((a) => a.turma_id),
       ...(recursos.prazo && dados.prazo_correcao ? { prazo_correcao: dados.prazo_correcao } : {}),
       // Depois de enviar notas, o trimestre não muda: a avaliação espelhada no SIDED+ já foi criada nele.
-      ...(recursos.trimestre && dados.trimestre && !trimestreTravado(av) ? { trimestre: Number(dados.trimestre) } : {}),
+      ...(recursos.trimestre && dados.trimestre && !travado ? { trimestre: Number(dados.trimestre) } : {}),
       ...(recursos.faixas ? { faixa_verde: Number(dados.faixas.verde), faixa_amarela: Number(dados.faixas.amarelo) } : {}),
     };
 
-    await nuvem.atualizarAvaliacao(dados.id, patch, dados.questoes, numAlternativas);
-    if (codigo) {
-      await nuvem.salvarLayoutCaderno({
-        avaliacaoId: dados.id,
-        professorId: db.sessao.professor_id,
-        escolaId: db.sessao.escola_id,
-        codigo,
-        qtdQuestoes: dados.questoes.length,
-        qtdAlternativas: numAlternativas,
+    // O id de cada questão existente é preservado (mesmo número = mesma linha na nuvem).
+    const questoesEnvio = dados.questoes.map((q) => {
+      const atual = (av.questoes || []).find((x) => Number(x.numero) === Number(q.numero));
+      return {
+        ...q,
+        id: atual?.id || q.id || q.id_cliente || nuvem.novoUuid(),
+        numero: Number(q.numero),
+        valor: Number(q.valor),
+        ...(!q.alternativas && atual?.alternativas ? { alternativas: atual.alternativas } : {}),
+      };
+    });
+
+    const localEditada = {
+      ...av,
+      titulo: dados.titulo,
+      descricao: dados.descricao || '',
+      disciplina: dados.disciplina || '',
+      valor_total: Number(dados.valor_total),
+      data_aplicacao: dados.data_aplicacao,
+      prazo_correcao: recursos.prazo ? (dados.prazo_correcao || null) : av.prazo_correcao,
+      trimestre: travado ? av.trimestre : (recursos.trimestre ? (Number(dados.trimestre) || null) : av.trimestre),
+      faixas: recursos.faixas ? { verde: Number(dados.faixas.verde), amarelo: Number(dados.faixas.amarelo) } : av.faixas,
+      lancar_sided: !!dados.lancar_sided,
+      turmas_ids: dados.aplicacoes.map((a) => a.turma_id),
+      layout: { ...(av.layout || {}), ...(codigo ? { codigo_caderno: codigo } : {}), num_alternativas: numAlternativas },
+      questoes: questoesEnvio.map((q) => ({
+        id: q.id,
+        numero: q.numero,
+        enunciado: q.enunciado || '',
+        valor: Number(q.valor),
+        num_alternativas: numAlternativas,
+        gabarito: q.anulada ? null : q.gabarito,
+        anulada: !!q.anulada,
+        ...(q.alternativas ? { alternativas: q.alternativas } : {}),
+      })),
+      aplicacoes: dados.aplicacoes.map((a) => {
+        const antiga = (av.aplicacoes || []).find((x) => x.turma_id === a.turma_id);
+        return {
+          id: `${av.id}:${a.turma_id}`,
+          turma_id: a.turma_id,
+          turma_disciplina_id: a.turma_disciplina_id,
+          disciplina_id: a.disciplina_id,
+          professor_id: a.professor_id,
+          sided_avaliacao_id: antiga?.sided_avaliacao_id || null,
+        };
+      }),
+      sync: 'pendente',
+    };
+    delete localEditada.erro_sync;
+
+    const item = await filaSync.enfileirarEdicao(db.sessao.usuario_id, {
+      avaliacao_id: av.id,
+      patch,
+      questoes: questoesEnvio,
+      num_alternativas: numAlternativas,
+      codigo_caderno: codigo,
+      escola_id: db.sessao.escola_id,
+      professor_id: db.sessao.professor_id,
+      // Versão que o professor tinha nas mãos; se a nuvem divergir, nada é sobrescrito.
+      base_versao: nuvem.impressaoDaAvaliacao(av, av.questoes),
+      trimestre_travado: travado,
+      // Notas já enviadas ao SIDED+: nenhuma questão é apagada (preserva vínculos e notas).
+      remover_questoes: !travado,
+      local: localEditada,
+    });
+
+    // Plano B: navegador sem IndexedDB. Só funciona online.
+    if (!item) {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        throw new Error('Sem internet e este navegador não permite guardar a edição no aparelho. Nada foi salvo.');
+      }
+      await nuvem.aplicarEdicaoAvaliacao({
+        avaliacao_id: av.id,
+        patch,
+        questoes: questoesEnvio,
+        num_alternativas: numAlternativas,
+        codigo_caderno: codigo,
+        professor_id: db.sessao.professor_id,
+        escola_id: db.sessao.escola_id,
+        base_versao: nuvem.impressaoDaAvaliacao(av, av.questoes),
+        trimestre_travado: travado,
+        remover_questoes: !travado,
       });
+      await iniciar();
+      return av.id;
     }
-    await iniciar();
-    return dados.id;
+
+    // A tela mostra a edição já mesma sem internet; a cópia local só muda após confirmação.
+    Object.assign(av, localEditada, { questoes: localEditada.questoes.map((q) => ({ ...q })) });
+    await atualizarEstadoDaFila();
+    await esperarNoMaximo(sincronizarFila(), ESPERA_MAX_SALVAR_MS);
+    await atualizarEstadoDaFila();
+
+    // Enviada agora: recarrega a verdade da nuvem (ids e vínculos). Offline, segue pendente.
+    if (avaliacao(av.id)?.sync === 'sincronizado') await iniciar();
+    return av.id;
   }
 
+  // O código do caderno viaja junto, pela fila (6E): primeiro a avaliação, depois as questões.
   const local = await criarAvaliacao(dados);
-  if (codigo) {
-    await nuvem.salvarLayoutCaderno({
-      avaliacaoId: local.id,
-      professorId: db.sessao.professor_id,
-      escolaId: db.sessao.escola_id,
-      codigo,
-      qtdQuestoes: dados.questoes.length,
-      qtdAlternativas: numAlternativas,
-    });
-    await iniciar();
-  }
   return local.id;
 }
 
@@ -587,6 +750,8 @@ export async function salvarAvaliacao(dados) {
 export async function excluirAvaliacao(id) {
   const av = avaliacao(id);
   if (!av) return { ok: false, erro: 'Avaliação não encontrada.' };
+  // Excluir uma avaliação que ainda está na fila deixaria o envio recriá-la depois.
+  if (avaliacaoPendente(av)) return { ok: false, erro: av.sync === 'conflito' ? MSG_AVALIACAO_EM_CONFLITO : MSG_AVALIACAO_PENDENTE };
 
   const resultados = resultadosDaAvaliacao(id).length;
   try {
@@ -912,6 +1077,7 @@ export async function definirTrimestre(avaliacaoId, trimestre) {
   const av = avaliacao(avaliacaoId);
   const tri = Number(trimestre);
   if (!av) return { ok: false, erro: 'Avaliação não encontrada.' };
+  if (avaliacaoPendente(av)) return { ok: false, erro: av.sync === 'conflito' ? MSG_AVALIACAO_EM_CONFLITO : MSG_AVALIACAO_PENDENTE };
   if (![1, 2, 3].includes(tri)) return { ok: false, erro: 'Escolha o 1º, 2º ou 3º trimestre.' };
   if (!recursos.trimestre) {
     return { ok: false, erro: 'A coluna trimestre ainda não existe em sicep_avaliacoes. Execute a migração SQL antes.' };
@@ -953,6 +1119,7 @@ export async function enviarAoSided(avaliacaoId, turmaId, resultadoIds = null) {
   const av = avaliacao(avaliacaoId);
   const apl = aplicacaoDe(av, turmaId);
   if (!av || !apl) return { ok: false, erro: 'Avaliação/turma não encontrada.' };
+  if (avaliacaoPendente(av)) return { ok: false, erro: av.sync === 'conflito' ? MSG_AVALIACAO_EM_CONFLITO : MSG_AVALIACAO_PENDENTE };
   if (!av.lancar_sided) return { ok: false, erro: 'Esta avaliação não está marcada para lançar no SIDED+.' };
   if (![1, 2, 3].includes(Number(av.trimestre))) {
     return { ok: false, erro: 'Esta avaliação não tem trimestre definido. Defina o trimestre antes de enviar.' };
@@ -1053,7 +1220,7 @@ export async function enviarAoSided(avaliacaoId, turmaId, resultadoIds = null) {
 export function fila() { return [...db.fila]; }
 export function erros() { return [...db.erros]; }
 
-const zeroFila = () => ({ pendente: 0, sincronizando: 0, sincronizado: 0, erro: 0, aberto: 0, total: 0 });
+const zeroFila = () => ({ pendente: 0, sincronizando: 0, sincronizado: 0, erro: 0, conflito: 0, aberto: 0, total: 0 });
 
 function notificarFila() {
   ouvintesFila.forEach((f) => { try { f(); } catch (e) { /* ignora */ } });
@@ -1070,29 +1237,64 @@ export function totalNaFilaDeEnvio() { return contagemFila.aberto; }
 export function contagemDaFila() { return { ...contagemFila }; }
 export function estaSincronizando() { return sincronizando; }
 
+const ehItemDeAvaliacao = (i) => ['avaliacao', 'questoes', 'edicao'].includes(i.tipo);
+
+/** Situação de uma avaliação a partir dos seus itens: só é sincronizada com TODOS enviados. */
+function statusAgregado(itens) {
+  if (itens.some((i) => i.status === 'conflito')) return 'conflito';
+  if (itens.some((i) => i.status === 'erro')) return 'erro';
+  if (itens.some((i) => i.status === 'sincronizando')) return 'sincronizando';
+  if (itens.some((i) => i.status === 'pendente')) return 'pendente';
+  return 'sincronizado';
+}
+
+/** Agrupa os itens de avaliação por avaliação (a ordem da fila é mantida dentro de cada grupo). */
+function itensPorAvaliacao(itens) {
+  const mapa = new Map();
+  itens.filter(ehItemDeAvaliacao).forEach((i) => {
+    if (!mapa.has(i.avaliacao_id)) mapa.set(i.avaliacao_id, []);
+    mapa.get(i.avaliacao_id).push(i);
+  });
+  return mapa;
+}
+
 /**
- * Relê a fila e acerta, na memória, a marca `sync` de cada resultado:
+ * Relê a fila e acerta, na memória, a marca `sync` de cada resultado e de cada avaliação:
  * item em aberto → status do item; sem item em aberto → 'sincronizado' (ou sem marca).
+ * Uma avaliação conta como UMA unidade na contagem (chip/painel), não como dois itens.
  */
 async function atualizarEstadoDaFila() {
   const uid = db.sessao?.usuario_id;
   if (uid == null) { contagemFila = zeroFila(); notificarFila(); return; }
 
   const itens = await filaSync.listar(uid);
+  const deResultado = itens.filter((i) => !ehItemDeAvaliacao(i));
+  const grupos = itensPorAvaliacao(itens);
+
   const c = zeroFila();
-  itens.forEach((i) => { c[i.status] = (c[i.status] || 0) + 1; c.total += 1; });
-  c.aberto = c.pendente + c.sincronizando + c.erro;
+  deResultado.forEach((i) => { c[i.status] = (c[i.status] || 0) + 1; c.total += 1; });
+  grupos.forEach((lista) => { const st = statusAgregado(lista); c[st] += 1; c.total += 1; });
+  c.aberto = c.pendente + c.sincronizando + c.erro + c.conflito;
   contagemFila = c;
 
   const emAberto = new Map(); // itens vêm em ordem de seq: o último de cada resultado vale
   const feitos = new Set();
-  itens.forEach((i) => {
+  deResultado.forEach((i) => {
     if (i.status === 'sincronizado') feitos.add(i.resultado_id);
     else emAberto.set(i.resultado_id, i.status);
   });
   db.resultados.forEach((r) => {
     if (emAberto.has(r.id)) r.sync = emAberto.get(r.id);
     else if (r.sync) r.sync = feitos.has(r.id) ? 'sincronizado' : undefined;
+  });
+
+  db.avaliacoes.forEach((av) => {
+    const lista = grupos.get(av.id);
+    if (lista) {
+      av.sync = statusAgregado(lista);
+      // Confirmada inteira pela nuvem: deixa de ser "só deste aparelho" (pode ser editada de novo).
+      if (av.sync === 'sincronizado') delete av.criada_local;
+    } else if (av.sync) delete av.sync; // fila já não guarda nada dela: está na nuvem
   });
   notificarFila();
 }
@@ -1110,7 +1312,7 @@ async function aplicarFilaNoEstado() {
     const itens = (await filaSync.listar(uid)).filter((i) => i.status !== 'sincronizado');
     itens.forEach((it) => {
       const l = it.local;
-      if (!l) return;
+      if (!l || ehItemDeAvaliacao(it)) return; // avaliações são tratadas logo abaixo
       const mesmaChave = (r) => r.avaliacao_id === l.avaliacao_id && r.aluno_id === l.aluno_id && r.turma_id === l.turma_id;
       const propria = db.resultados.find((r) => r.id === it.resultado_id);
       const outra = db.resultados.find((r) => r.id !== it.resultado_id && mesmaChave(r) && !r.sync);
@@ -1118,6 +1320,24 @@ async function aplicarFilaNoEstado() {
       const linha = { ...l, enviado_em: propria?.enviado_em ?? l.enviado_em ?? null, sync: it.status };
       if (propria) Object.assign(propria, linha);
       else db.resultados.unshift(linha);
+    });
+
+    // Avaliações criadas/editadas offline e ainda não enviadas inteiras: voltam à lista ao reabrir o app.
+    // Criação ausente: entra. Edição: sobrepõe a versão da cópia local (a edição é a mais nova)
+    // sem duplicar a avaliação nem suas questões. Se só faltam questões na criação, completa.
+    const vistas = new Set();
+    itens.filter((i) => ehItemDeAvaliacao(i) && i.local).forEach((it) => {
+      if (vistas.has(it.avaliacao_id)) return;
+      vistas.add(it.avaliacao_id);
+      const l = it.local;
+      const propria = db.avaliacoes.find((a) => a.id === (l.id || it.avaliacao_id));
+      if (!propria) {
+        db.avaliacoes.unshift({ ...l, questoes: (l.questoes || []).map((q) => ({ ...q })), sync: it.status });
+      } else if (it.tipo === 'edicao') {
+        Object.assign(propria, { ...l, questoes: (l.questoes || []).map((q) => ({ ...q })), sync: it.status });
+      } else if ((propria.questoes || []).length < (l.questoes || []).length) {
+        propria.questoes = (l.questoes || []).map((q) => ({ ...q }));
+      }
     });
     await atualizarEstadoDaFila();
   } catch (e) {
@@ -1127,6 +1347,7 @@ async function aplicarFilaNoEstado() {
 
 /** Chamado pela fila SÓ depois que o servidor confirmou a gravação de um item. */
 async function aoConfirmarNoServidor(item, linha) {
+  if (ehItemDeAvaliacao(item)) { await aoConfirmarAvaliacao(item, linha); return; }
   const r = db.resultados.find((x) => x.id === item.resultado_id);
   if (r && linha?.created_at) r.criado_em = linha.created_at;
   await atualizarEstadoDaFila();   // marca 'sincronizado' (ou mantém pendente se há operação mais nova)
@@ -1136,6 +1357,29 @@ async function aoConfirmarNoServidor(item, linha) {
   if (r && r.sync === 'sincronizado' && db.sessao) {
     const { sync, ...confirmada } = r;
     await offline.gravar('resultados', db.sessao.usuario_id, r.id, confirmada);
+  }
+  atualizarCacheLocal();
+}
+
+/** Avaliação/questões confirmadas pelo servidor: a avaliação só vira 'sincronizada' com os DOIS itens enviados. */
+async function aoConfirmarAvaliacao(item, linha) {
+  const av = db.avaliacoes.find((x) => x.id === item.avaliacao_id);
+  const questoesNuvem = item.tipo === 'questoes' ? linha?.questoes
+    : (item.tipo === 'edicao' ? linha?.servidor?.questoes : null);
+  if (av && Array.isArray(questoesNuvem)) {
+    // Se a nuvem usou outro id para alguma questão, passa a valer o da nuvem.
+    const idPorNumero = new Map(questoesNuvem.map((q) => [Number(q.numero), q.id]));
+    (av.questoes || []).forEach((q) => { const idNuvem = idPorNumero.get(Number(q.numero)); if (idNuvem) q.id = idNuvem; });
+  }
+  await atualizarEstadoDaFila();
+
+  // A cópia local só inclui a avaliação AGORA, com o servidor tendo confirmado tudo.
+  // Grava direto: vale também quando o app foi aberto offline (dados vindos da cópia local).
+  if (av && av.sync === 'sincronizado' && db.sessao) {
+    const { sync, questoes, ...semQuestoes } = av;
+    const uid = db.sessao.usuario_id;
+    await offline.gravar('avaliacoes', uid, av.id, semQuestoes);
+    for (const q of questoes || []) await offline.gravar('questoes', uid, `${av.id}|${q.numero}`, { ...q, avaliacao_id: av.id });
   }
   atualizarCacheLocal();
 }
@@ -1201,14 +1445,49 @@ export function ativarSincronizacao() {
   return sincronizarFila();
 }
 
-/** Itens da fila ainda não enviados, para o painel (com nomes para leitura humana). */
+/** Itens da fila ainda não enviados, para o painel (com nomes para leitura humana). Uma avaliação = uma linha. */
 export async function itensDaFila() {
   const uid = db.sessao?.usuario_id;
   if (uid == null) return [];
-  const itens = await filaSync.listar(uid);
-  return itens
-    .filter((i) => i.status !== 'sincronizado')
-    .map((i) => ({
+  const itens = (await filaSync.listar(uid)).filter((i) => i.status !== 'sincronizado');
+  const grupos = itensPorAvaliacao(itens);
+  const linhas = [];
+  const vistas = new Set();
+
+  itens.forEach((i) => {
+    if (ehItemDeAvaliacao(i)) {
+      if (vistas.has(i.avaliacao_id)) return;
+      vistas.add(i.avaliacao_id);
+      const lista = grupos.get(i.avaliacao_id);
+      const comErro = lista.find((x) => x.status === 'erro');
+      const comConflito = lista.find((x) => x.status === 'conflito');
+      const ehEdicao = lista.some((x) => x.tipo === 'edicao');
+      linhas.push({
+        tipo: ehEdicao ? 'edicao' : 'avaliacao',
+        seq: (comConflito || lista[0]).seq,
+        avaliacao_id: i.avaliacao_id,
+        status: statusAgregado(lista),
+        tentativas: Math.max(...lista.map((x) => x.tentativas || 0)),
+        erro: comErro?.erro || comConflito?.erro || null,
+        permanente: lista.some((x) => (x.status === 'erro' && x.permanente) || x.status === 'conflito'),
+        conflito: comConflito?.conflito || null,
+        criado_em: lista[0].criado_em,
+        titulo: i.local?.titulo || '—',
+        aluno: null,
+        avaliacao: i.local?.titulo || '—',
+        local: i.local ? {
+          titulo: i.local.titulo || '',
+          valor_total: Number(i.local.valor_total || 0),
+          data_aplicacao: i.local.data_aplicacao || null,
+          trimestre: i.local.trimestre ?? null,
+          questoes: (i.local.questoes || []).length,
+        } : null,
+        turma: (i.local?.turmas_ids || []).map((t) => turma(t)?.nome).filter(Boolean).join(', '),
+      });
+      return;
+    }
+    linhas.push({
+      tipo: 'resultado',
       seq: i.seq,
       status: i.status,
       tentativas: i.tentativas || 0,
@@ -1218,14 +1497,66 @@ export async function itensDaFila() {
       aluno: aluno(i.local?.aluno_id)?.nome_completo || '—',
       avaliacao: avaliacao(i.local?.avaliacao_id)?.titulo || '—',
       turma: turma(i.local?.turma_id)?.nome || '',
-    }));
+    });
+  });
+  return linhas;
 }
 
-/** Descarta um item (ação explícita do usuário) e recarrega a lista a partir da nuvem/cópia local. */
+/**
+ * Descarta um item (ação explícita do usuário) e recarrega a lista a partir da nuvem/cópia local.
+ * Descartar uma avaliação apaga do aparelho a avaliação, as questões e os resultados já lidos para ela
+ * que ainda estão na fila: sem a avaliação na nuvem, esses resultados também seriam recusados.
+ */
 export async function descartarItemDaFila(seq) {
-  const ok = await filaSync.descartar(seq);
+  const uid = db.sessao?.usuario_id;
+  const todos = uid == null ? [] : await filaSync.listar(uid);
+  const alvo = todos.find((i) => i.seq === seq);
+  let ok;
+  if (alvo && (alvo.tipo === 'avaliacao' || alvo.tipo === 'questoes')) {
+    // Criação ainda fora da nuvem: descartar leva junto questões e resultados já lidos dela.
+    const doConjunto = todos.filter((i) => i.status !== 'sincronizado'
+      && (i.avaliacao_id === alvo.avaliacao_id || i.local?.avaliacao_id === alvo.avaliacao_id));
+    ok = true;
+    for (const i of doConjunto) ok = (await filaSync.descartar(i.seq)) && ok;
+  } else {
+    // Edição local ou resultado: descarta só o item escolhido (nunca a avaliação da nuvem).
+    ok = await filaSync.descartar(seq);
+  }
   if (ok) await iniciar();
   return ok;
+}
+
+/**
+ * Resolve um conflito de edição (6F): o professor escolhe qual versão manter.
+ * 'local'  -> a versão deste aparelho é enviada (com as duas versões já preservadas até aqui).
+ * 'nuvem'  -> a versão da nuvem prevalece; a edição local guardada é descartada.
+ * Nunca altera resultados nem notas já enviadas ao SIDED+.
+ */
+export async function resolverConflitoDaAvaliacao(avaliacaoId, escolha) {
+  const uid = db.sessao?.usuario_id;
+  if (uid == null) return { ok: false, erro: 'Sessão não encontrada.' };
+  const itens = await filaSync.listar(uid);
+  const item = itens.find((i) => i.avaliacao_id === avaliacaoId && i.status === 'conflito');
+  if (!item) return { ok: false, erro: 'Não há conflito pendente para esta avaliação.' };
+
+  const ok = await filaSync.resolverConflito(uid, item.seq, escolha === 'nuvem' ? 'nuvem' : 'local');
+  if (!ok) return { ok: false, erro: 'Não foi possível resolver o conflito.' };
+
+  await atualizarEstadoDaFila();
+  if (escolha !== 'nuvem') {
+    await sincronizarFila();
+    const av = avaliacao(avaliacaoId);
+    if (av?.sync === 'conflito') {
+      return { ok: false, erro: 'A nuvem alterou a avaliação de novo durante o envio. O conflito continua guardado.' };
+    }
+  }
+  await iniciar();
+  return { ok: true };
+}
+
+/** Avaliações que têm conflito guardado (para avisos na lista/detalhe). */
+export function temConflito(av) {
+  return av?.sync === 'conflito';
 }
 
 export function estadoSincronizacao() {
@@ -1233,9 +1564,10 @@ export function estadoSincronizacao() {
   const c = contagemFila;
   const abertos = c.aberto;
   if (!navigator.onLine) return { classe: 'offline', texto: abertos ? `Offline · ${abertos} a enviar` : 'Offline', abertos };
-  if (sincronizando && abertos) return { classe: 'pendente', texto: `Enviando ${abertos}…`, abertos };
+  if (c.conflito) return { classe: 'pendente', texto: `${c.conflito} conflito${c.conflito === 1 ? '' : 's'} de versão`, abertos };
+  if (sincronizando && abertos) return { classe: 'pendente', texto: `Sincronizando ${abertos}…`, abertos };
   if (c.erro) return { classe: 'pendente', texto: `${abertos} a enviar · ${c.erro} com erro`, abertos };
   if (abertos) return { classe: 'pendente', texto: `${abertos} a enviar`, abertos };
-  if (origem === 'cache') return { classe: 'offline', texto: 'Dados salvos', abertos };
-  return { classe: '', texto: 'Sincronizado', abertos };
+  if (origem === 'cache') return { classe: 'offline', texto: `Online · dados salvos${abertos ? ` · ${abertos} a enviar` : ''}`, abertos };
+  return { classe: '', texto: 'Online', abertos };
 }

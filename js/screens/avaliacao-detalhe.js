@@ -1,11 +1,12 @@
 import * as store from '../store.js';
 import {
   el, esc, icon, fmtData, fmtNota, statusAvaliacao,
-  iniciais, prazoChip, badge, toast,
+  iniciais, prazoChip, badge, toast, syncAvaliacaoBadge, reagirEnquantoVisivel,
 } from '../ui.js';
 
 export default function avaliacaoDetalhe(params) {
-  const av = store.avaliacao(params[0]);
+  let av = store.avaliacao(params[0]);
+  const avId = params[0];
 
   if (!av) {
     return el(`
@@ -222,6 +223,7 @@ export default function avaliacaoDetalhe(params) {
         <h1>${esc(av.titulo)}</h1>
         <div class="row wrap" style="gap:8px;margin-top:4px">
           ${statusAvaliacao(av.status)}
+          ${syncAvaliacaoBadge(av.sync)}
           ${prazoChip(prazo)}
           ${av.lancar_sided ? '<span class="badge y">Integra SIDED+</span>' : '<span class="badge">Somente SICEP+</span>'}
         </div>
@@ -265,9 +267,32 @@ export default function avaliacaoDetalhe(params) {
             <span>O banco ainda não tem a coluna <span class="mono xs">trimestre</span> em <span class="mono xs">sicep_avaliacoes</span>. Execute a migração SQL para poder definir o trimestre e enviar notas.</span>
           </div>`) : ''}
 
+        ${av.sync === 'conflito' ? `
+          <div class="alert err" style="margin-top:12px">${icon('alert', 16)}
+            <span><strong>Conflito de versões.</strong> Esta avaliação foi alterada na nuvem depois do início da sua edição.
+            As duas versões estão guardadas: sua versão neste aparelho e a versão da nuvem. Escolha qual manter.
+            Nenhuma nota já enviada ao SIDED+ será alterada.</span>
+          </div>
+          <div class="row wrap" style="margin-top:8px;gap:8px">
+            <button class="btn btn-primary btn-sm" type="button" data-conflito-local>${icon('check', 14)} Manter minha versão</button>
+            <button class="btn btn-outline btn-sm" type="button" data-conflito-nuvem>${icon('cloud', 14)} Manter versão da nuvem</button>
+          </div>` : ''}
+        ${store.avaliacaoSoLocal(av) && av.sync !== 'erro' ? `
+          <div class="alert warn" style="margin-top:12px">${icon('info', 16)}
+            <span>Esta avaliação foi criada neste aparelho e será enviada à nuvem quando houver conexão. Até lá, ela não pode ser editada nem excluída.</span>
+          </div>` : (av.sync === 'pendente' && store.avaliacaoPendente(av) ? `
+          <div class="alert warn" style="margin-top:12px">${icon('info', 16)}
+            <span>Suas alterações estão salvas neste aparelho e serão enviadas à nuvem quando houver conexão.</span>
+          </div>` : '')}
+        ${av.sync === 'erro' ? `
+          <div class="alert err" style="margin-top:12px">${icon('alert', 16)}
+            <span>A nuvem recusou o último envio${av.erro_sync ? `: ${esc(av.erro_sync)}` : ''}. Os dados continuam guardados neste aparelho; tente novamente no painel de envios pendentes.</span>
+          </div>` : ''}
         <div class="row wrap" style="margin-top:14px;gap:8px">
-          <a class="btn btn-outline btn-sm" href="#/avaliacoes/editar/${esc(av.id)}">${icon('edit', 14)} Editar avaliação</a>
-          <button class="btn btn-ghost btn-sm" type="button" data-excluir>${icon('trash', 14)} Excluir</button>
+          ${store.avaliacaoSoLocal(av) || av.sync === 'conflito'
+            ? `<button class="btn btn-outline btn-sm" type="button" disabled>${icon('edit', 14)} Editar avaliação</button>`
+            : `<a class="btn btn-outline btn-sm" href="#/avaliacoes/editar/${esc(av.id)}">${icon('edit', 14)} Editar avaliação</a>`}
+          <button class="btn btn-ghost btn-sm" type="button" data-excluir ${store.avaliacaoSoLocal(av) || av.sync === 'conflito' ? 'disabled' : ''}>${icon('trash', 14)} Excluir</button>
         </div>
       </section>
 
@@ -310,6 +335,20 @@ export default function avaliacaoDetalhe(params) {
       b.addEventListener('click', () => abrirPrevia(b.dataset.previa));
     });
 
+    root.querySelectorAll('[data-conflito-local], [data-conflito-nuvem]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const manterLocal = b.hasAttribute('data-conflito-local');
+        const aviso = manterLocal
+          ? 'Manter a SUA versão?\n\nA versão da nuvem será substituída pela edição deste aparelho. Notas já enviadas ao SIDED+ não são alteradas.'
+          : 'Manter a versão da NUVEM?\n\nA edição feita neste aparelho será descartada. A avaliação e as questões da nuvem continuam como estão.';
+        if (!window.confirm(aviso)) return;
+        b.disabled = true;
+        const r = await store.resolverConflitoDaAvaliacao(av.id, manterLocal ? 'local' : 'nuvem');
+        if (!r.ok) { b.disabled = false; toast(r.erro, 'err'); return; }
+        toast(manterLocal ? 'Sua versão foi enviada à nuvem.' : 'Versão da nuvem mantida.', 'ok');
+      });
+    });
+
     root.querySelector('[data-excluir]').addEventListener('click', async (ev) => {
       const total = store.resultadosDaAvaliacao(av.id).length;
       const aviso = total
@@ -327,5 +366,6 @@ export default function avaliacaoDetalhe(params) {
   }
 
   pintar();
+  reagirEnquantoVisivel(root, store.aoMudarSincronizacao, () => { av = store.avaliacao(avId) || av; pintar(); });
   return root;
 }

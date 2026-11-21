@@ -543,7 +543,19 @@ export default function novaAvaliacao(params) {
         ).filter(Boolean))].join(', '),
       });
 
-      toast(avEdicao ? 'Avaliação atualizada.' : 'Avaliação criada com sucesso.', 'ok');
+      const salva = store.avaliacao(idSalvo);
+      const semRede = typeof navigator !== 'undefined' && navigator.onLine === false;
+      if (salva?.sync === 'conflito') {
+        toast('A avaliação foi alterada na nuvem enquanto você editava. Resolva o conflito na avaliação.', 'err');
+      } else if (salva?.sync === 'erro') {
+        toast('A nuvem recusou o envio. Seus dados continuam guardados neste aparelho — veja os envios pendentes.', 'err');
+      } else if (store.avaliacaoPendente(salva)) {
+        toast(semRede
+          ? (avEdicao ? 'Sem internet: alterações salvas neste aparelho. Serão enviadas quando a conexão voltar.' : 'Sem internet: avaliação salva neste aparelho. Será enviada quando a conexão voltar.')
+          : 'Salvo neste aparelho. O envio à nuvem será refeito automaticamente.', 'ok');
+      } else {
+        toast(avEdicao ? 'Avaliação atualizada.' : 'Avaliação criada com sucesso.', 'ok');
+      }
       location.hash = '#/avaliacoes/' + idSalvo;
     } catch (e) {
       st.salvando = false;

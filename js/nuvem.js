@@ -352,26 +352,39 @@ async function sincronizarQuestoes(avaliacaoId, questoes, numAlternativas, opcoe
   }
 }
 
+// Colunas opcionais de questão que podem existir em bancos mais novos (ex.: habilidades).
+// São preservadas quando a linha do servidor já as tem — nunca inventadas nem apagadas.
+const CAMPOS_EXTRA_QUESTAO = ['habilidade', 'habilidade_id', 'descritor', 'bncc'];
+
 async function sincronizarQuestoesUmaVez(avaliacaoId, questoes, numAlternativas, { remover }) {
-  const base = ['id', 'numero', 'enunciado', 'valor', 'num_alternativas', 'gabarito'];
   let temAnulada = true;
   let atuais;
   try {
-    atuais = await api(`sicep_questoes?avaliacao_id=eq.${avaliacaoId}&select=${[...base, 'anulada'].join(',')}&order=numero.asc`) || [];
+    // select=* permite preservar colunas opcionais existentes (anulada, habilidade…).
+    atuais = await api(`sicep_questoes?avaliacao_id=eq.${avaliacaoId}&select=*&order=numero.asc`) || [];
+    if (atuais.length && !Object.prototype.hasOwnProperty.call(atuais[0], 'anulada')) temAnulada = false;
   } catch (e) {
     temAnulada = false;
-    atuais = await api(`sicep_questoes?avaliacao_id=eq.${avaliacaoId}&select=${base.join(',')}&order=numero.asc`) || [];
+    atuais = await api(`sicep_questoes?avaliacao_id=eq.${avaliacaoId}&select=id,numero,enunciado,valor,num_alternativas,gabarito&order=numero.asc`) || [];
   }
 
   const porNumero = new Map();
   atuais.forEach((q) => { if (!porNumero.has(Number(q.numero))) porNumero.set(Number(q.numero), q); });
 
-  const corpoDe = (q) => ({
+  const extrasDe = (q, ex) => {
+    const extras = {};
+    CAMPOS_EXTRA_QUESTAO.forEach((campo) => {
+      if (ex && Object.prototype.hasOwnProperty.call(ex, campo) && Object.prototype.hasOwnProperty.call(q, campo)) extras[campo] = q[campo];
+    });
+    return extras;
+  };
+  const corpoDe = (q, ex = null) => ({
     numero: Number(q.numero),
     enunciado: q.enunciado || null,
     valor: Number(q.valor),
     num_alternativas: Number(numAlternativas),
     gabarito: q.gabarito,
+    ...extrasDe(q, ex),
   });
   const igual = (ex, c, q) => (
     (ex.enunciado || null) === c.enunciado
@@ -379,6 +392,9 @@ async function sincronizarQuestoesUmaVez(avaliacaoId, questoes, numAlternativas,
     && Number(ex.num_alternativas) === c.num_alternativas
     && (ex.gabarito || null) === (c.gabarito || null)
     && (!temAnulada || !!ex.anulada === !!q.anulada)
+    && CAMPOS_EXTRA_QUESTAO.every((campo) => !Object.prototype.hasOwnProperty.call(ex, campo)
+      || !Object.prototype.hasOwnProperty.call(c, campo)
+      || JSON.stringify(ex[campo] ?? null) === JSON.stringify(c[campo] ?? null))
   );
 
   const novasLinhas = [];
@@ -452,6 +468,16 @@ async function garantirAlternativas(salvas, questoesEntrada, numAlternativas) {
  * faltou e não cria registros em dobro nem sobrescreve edições posteriores.
  */
 export async function criarAvaliacao(dados, usuarioId) {
+  const avaliacao = await gravarAvaliacaoIdempotente(dados, usuarioId);
+  const salvas = await gravarQuestoesIdempotente(avaliacao.id, dados.questoes, dados.num_alternativas);
+  return { ...avaliacao, questoes: salvas };
+}
+
+/**
+ * Passo 1 da criação (6E): só a linha de sicep_avaliacoes, com o id vindo do cliente.
+ * Repetir não duplica: se a linha já existe, devolve a que está lá, sem alterá-la.
+ */
+export async function gravarAvaliacaoIdempotente(dados, usuarioId) {
   const corpo = {
     ...(dados.id ? { id: dados.id } : {}),
     professor_id: usuarioId,
@@ -475,19 +501,26 @@ export async function criarAvaliacao(dados, usuarioId) {
     [avaliacao] = await api(`sicep_avaliacoes?id=eq.${dados.id}&professor_id=eq.${usuarioId}&select=*&limit=1`) || [];
   }
   if (!avaliacao) throw new Error('A avaliação não foi gravada.');
+  return avaliacao;
+}
 
-  const { questoes: salvas } = await sincronizarQuestoes(avaliacao.id, dados.questoes, dados.num_alternativas, { remover: false });
+/**
+ * Passo 2 da criação (6E): questões e alternativas de uma avaliação que já existe na nuvem.
+ * Identidade estável por (avaliacao_id, numero): repetir completa o que faltou e não duplica.
+ * Devolve [{ id, numero }] com os ids que a nuvem tem.
+ */
+export async function gravarQuestoesIdempotente(avaliacaoId, questoes, numAlternativas) {
+  const { questoes: salvas } = await sincronizarQuestoes(avaliacaoId, questoes, numAlternativas, { remover: false });
   // Alternativas (texto opcional — o gabarito oficial é sicep_questoes.gabarito)
-  await garantirAlternativas(salvas, dados.questoes, dados.num_alternativas);
-
-  return { ...avaliacao, questoes: salvas };
+  await garantirAlternativas(salvas, questoes, numAlternativas);
+  return salvas;
 }
 
 /**
  * Atualiza a avaliação e sincroniza as questões SEM apagar e recriar:
  * as linhas existentes mantêm o id e os vínculos. Repetir a chamada é seguro.
  */
-export async function atualizarAvaliacao(avaliacaoId, patch, questoes, numAlternativas) {
+export async function atualizarAvaliacao(avaliacaoId, patch, questoes, numAlternativas, { remover = true } = {}) {
   const [atualizada] = await api(`sicep_avaliacoes?id=eq.${avaliacaoId}`, {
     method: 'PATCH',
     headers: { Prefer: 'return=representation' },
@@ -495,11 +528,118 @@ export async function atualizarAvaliacao(avaliacaoId, patch, questoes, numAltern
   }) || [];
 
   if (Array.isArray(questoes)) {
-    const { novas } = await sincronizarQuestoes(avaliacaoId, questoes, numAlternativas, { remover: true });
+    const { novas } = await sincronizarQuestoes(avaliacaoId, questoes, numAlternativas, { remover });
     await garantirAlternativas(novas, questoes, numAlternativas);
   }
 
   return atualizada;
+}
+
+/* ---------------- Versão da avaliação (edição offline, conflitos) ---------------- */
+
+/**
+ * Retrato estável e comparável de uma avaliação + questões.
+ * Serve para detectar se a avaliação mudou na nuvem entre o início da edição
+ * offline e o envio — sem depender de coluna updated_at (que pode não existir).
+ * A ordem dos campos e a ordenação das questões são fixas: mesmos dados, mesma impressão.
+ */
+function versaoDaAvaliacao(avaliacao, questoes) {
+  const av = avaliacao || {};
+  const lista = (questoes || []).map((q) => ({
+    numero: Number(q.numero),
+    enunciado: q.enunciado || '',
+    valor: Number(q.valor || 0),
+    num_alternativas: Number(q.num_alternativas || 4),
+    gabarito: q.gabarito || null,
+    anulada: !!q.anulada,
+  })).sort((a, b) => a.numero - b.numero);
+  return {
+    titulo: av.titulo || '',
+    descricao: av.descricao || '',
+    disciplina: av.disciplina || '',
+    valor_total: Number(av.valor_total || 0),
+    data_aplicacao: av.data_aplicacao || null,
+    lancar_sided: !!av.lancar_sided,
+    trimestre: av.trimestre != null ? Number(av.trimestre) : null,
+    turmas_ids: [...(av.turmas_ids || [])].map(String).sort(),
+    // As faixas de cor não entram: o banco pode não ter as colunas e o app usa 80/60
+    // como padrão, o que geraria conflito falso em toda edição.
+    questoes: lista,
+  };
+}
+
+export function impressaoDaAvaliacao(avaliacao, questoes) {
+  return JSON.stringify(versaoDaAvaliacao(avaliacao, questoes));
+}
+
+/** Lê a versão que está na nuvem agora (avaliação + questões), com impressão para comparar. */
+export async function lerAvaliacaoDaNuvem(avaliacaoId) {
+  const [avaliacao] = await api(`sicep_avaliacoes?id=eq.${avaliacaoId}&select=*&limit=1`) || [];
+  if (!avaliacao) return null;
+  const questoes = await api(`sicep_questoes?avaliacao_id=eq.${avaliacaoId}&select=*&order=numero.asc`) || [];
+  return {
+    avaliacao,
+    questoes,
+    impressao: impressaoDaAvaliacao(avaliacao, questoes),
+    resumo: {
+      titulo: avaliacao.titulo || '',
+      descricao: avaliacao.descricao || '',
+      valor_total: Number(avaliacao.valor_total || 0),
+      data_aplicacao: avaliacao.data_aplicacao || null,
+      trimestre: avaliacao.trimestre != null ? Number(avaliacao.trimestre) : null,
+      turmas_ids: avaliacao.turmas_ids || [],
+      questoes: questoes.map((q) => ({
+        numero: Number(q.numero), valor: Number(q.valor || 0),
+        gabarito: q.gabarito || null, enunciado: q.enunciado || '', anulada: !!q.anulada,
+      })),
+    },
+  };
+}
+
+/**
+ * Aplica uma edição feita no aparelho (Etapa 6F).
+ * - Antes de gravar, lê a versão da nuvem e compara com `base_versao` (a que o professor
+ *   tinha quando editou). Se mudou e não foi pedido `forcar`, lança erro `CONFLITO` trazendo
+ *   a versão do servidor: nada é sobrescrito e as duas versões ficam disponíveis.
+ * - `trimestre_travado`: notas já enviadas ao SIDED+; o trimestre não é alterado.
+ * - `remover_questoes: false`: notas já enviadas; nenhuma questão é apagada (preserva vínculos).
+ * - Questões mantêm o id e os vínculos: só mudam os campos; números novos são inseridos com
+ *   id estável gerado no aparelho (repetir não duplica).
+ */
+export async function aplicarEdicaoAvaliacao({
+  avaliacao_id, patch, questoes, num_alternativas, codigo_caderno, professor_id, escola_id,
+  base_versao, forcar = false, trimestre_travado = false, remover_questoes = true,
+}) {
+  const servidor = await lerAvaliacaoDaNuvem(avaliacao_id);
+  if (!servidor) {
+    const e = new Error('Esta avaliação não existe mais na nuvem.');
+    e.status = 404;
+    throw e;
+  }
+  if (!forcar && base_versao && base_versao !== servidor.impressao) {
+    const e = new Error('A avaliação foi alterada na nuvem depois do início da sua edição.');
+    e.codigo = 'CONFLITO';
+    e.servidor = servidor;
+    throw e;
+  }
+
+  const corpo = { ...patch };
+  if (trimestre_travado) delete corpo.trimestre;
+
+  const atualizada = await atualizarAvaliacao(avaliacao_id, corpo, questoes, num_alternativas, {
+    remover: remover_questoes !== false,
+  });
+  if (codigo_caderno) {
+    await salvarLayoutCaderno({
+      avaliacaoId: avaliacao_id,
+      professorId: professor_id,
+      escolaId: escola_id,
+      codigo: codigo_caderno,
+      qtdQuestoes: (questoes || []).length,
+      qtdAlternativas: num_alternativas,
+    });
+  }
+  return { avaliacao: atualizada, servidor: await lerAvaliacaoDaNuvem(avaliacao_id) };
 }
 
 /** Apaga a avaliação e seus dependentes (não há FK em cascata nas tabelas sicep_*). */

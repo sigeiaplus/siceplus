@@ -1,5 +1,5 @@
 import * as store from '../store.js';
-import { el, esc, icon, fmtData, fmtNota, statusAvaliacao, prazoChip } from '../ui.js';
+import { el, esc, icon, fmtData, fmtNota, statusAvaliacao, prazoChip, syncAvaliacaoBadge, reagirEnquantoVisivel } from '../ui.js';
 
 export default function avaliacoes() {
   const root = el('<div class="stack"></div>');
@@ -37,6 +37,7 @@ export default function avaliacoes() {
         </div>
 
         <div class="row wrap" style="gap:6px">
+          ${syncAvaliacaoBadge(av.sync)}
           ${prazoChip(store.prazoDe(av))}
           ${av.lancar_sided ? '<span class="badge y">SIDED+</span>' : '<span class="badge">Somente SICEP+</span>'}
         </div>
@@ -83,5 +84,6 @@ export default function avaliacoes() {
   }
 
   pintar();
+  reagirEnquantoVisivel(root, store.aoMudarSincronizacao, pintar);
   return root;
 }

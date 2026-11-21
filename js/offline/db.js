@@ -325,7 +325,9 @@ export async function filaEnfileirar(usuarioId, item) {
     let gravado = null;
 
     const todos = await aoRedor(loja.index('usuario_id').getAll(IDBKeyRange.only(usuarioId)));
-    const igual = todos.find((x) => x.resultado_id === item.resultado_id && STATUS_REGRAVAVEL.includes(x.status));
+    // Só resultados se fundem: itens de avaliação/questões (6E) não têm `resultado_id`.
+    const igual = item.resultado_id == null ? null
+      : todos.find((x) => x.resultado_id === item.resultado_id && STATUS_REGRAVAVEL.includes(x.status));
     const agora = new Date().toISOString();
 
     if (igual) {
@@ -361,6 +363,112 @@ export async function filaEnfileirar(usuarioId, item) {
     return gravado;
   } catch (e) {
     console.warn('[SICEP+] filaEnfileirar', e);
+    return null;
+  }
+}
+
+/**
+ * Enfileira VÁRIOS itens de uma mesma avaliação (6E) numa única transação, na ordem dada
+ * (avaliação primeiro, questões depois): ou entram todos ou nenhum, e o `seq` respeita a ordem.
+ * Se esta avaliação já tem itens ainda não enviados, devolve esses mesmos (repetir o salvar
+ * não gera uma segunda avaliação nem questões em dobro). Devolve a lista de itens ou null.
+ */
+export async function filaEnfileirarLote(usuarioId, avaliacaoId, itens) {
+  const idb = await abrir();
+  if (!idb || usuarioId == null) return null;
+  try {
+    const tx = idb.transaction(LOJA_FILA, 'readwrite');
+    const loja = tx.objectStore(LOJA_FILA);
+    const pronto = fimDaTransacao(tx);
+
+    const todos = await aoRedor(loja.index('usuario_id').getAll(IDBKeyRange.only(usuarioId)));
+    const abertos = todos.filter((x) => x.avaliacao_id === avaliacaoId
+      && (x.tipo === 'avaliacao' || x.tipo === 'questoes') && x.status !== 'sincronizado');
+    if (abertos.length) {
+      await pronto;
+      return abertos.sort((a, b) => a.seq - b.seq);
+    }
+
+    const agora = new Date().toISOString();
+    const gravados = [];
+    for (const item of itens) {
+      const linha = {
+        ...item,
+        usuario_id: usuarioId,
+        status: 'pendente',
+        erro: null,
+        permanente: false,
+        tentativas: 0,
+        criado_em: agora,
+        atualizado_em: agora,
+        sincronizado_em: null,
+      };
+      linha.seq = await aoRedor(loja.add(linha)); // autoincremento: cada um recebe um seq maior que o anterior
+      gravados.push(linha);
+    }
+    await pronto;
+    return gravados;
+  } catch (e) {
+    console.warn('[SICEP+] filaEnfileirarLote', e);
+    return null;
+  }
+}
+
+/**
+ * Enfileira uma EDIÇÃO de avaliação já existente (6F), numa única transação.
+ * Se esta avaliação já tem uma edição ainda não enviada, ela é atualizada NO LUGAR
+ * (mesmo `seq`): salvar de novo não cria uma segunda edição nem duplica o envio.
+ * Item em andamento ('sincronizando') não é tocado — nasce outro depois dele.
+ * Devolve o item gravado ou null se o IndexedDB falhar/não existir.
+ */
+export async function filaEnfileirarEdicao(usuarioId, item) {
+  const idb = await abrir();
+  if (!idb || usuarioId == null) return null;
+  try {
+    const tx = idb.transaction(LOJA_FILA, 'readwrite');
+    const loja = tx.objectStore(LOJA_FILA);
+    const pronto = fimDaTransacao(tx);
+    const agora = new Date().toISOString();
+
+    const todos = await aoRedor(loja.index('usuario_id').getAll(IDBKeyRange.only(usuarioId)));
+    const igual = todos.find((x) => x.tipo === 'edicao' && x.avaliacao_id === item.avaliacao_id
+      && (x.status === 'pendente' || x.status === 'erro'));
+
+    let gravado;
+    if (igual) {
+      gravado = {
+        ...igual,
+        ...item,
+        seq: igual.seq,
+        usuario_id: usuarioId,
+        status: 'pendente',
+        erro: null,
+        permanente: false,
+        conflito: null,
+        tentativas: 0,
+        criado_em: igual.criado_em,
+        atualizado_em: agora,
+      };
+      loja.put(gravado);
+    } else {
+      gravado = {
+        ...item,
+        usuario_id: usuarioId,
+        status: 'pendente',
+        erro: null,
+        permanente: false,
+        conflito: null,
+        tentativas: 0,
+        criado_em: agora,
+        atualizado_em: agora,
+        sincronizado_em: null,
+      };
+      gravado.seq = await aoRedor(loja.add(gravado));
+    }
+    await pronto;
+    return gravado;
+  } catch (e) {
+    console.warn('[SICEP+] filaEnfileirarEdicao', e);
     return null;
   }
 }
