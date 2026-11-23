@@ -579,39 +579,95 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 
 /* ---------------- Desempenho por habilidade (Etapa 4C) ---------------- */
 
-.des-filtros {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-  align-items: end;
+.page:has(> .des-root) { max-width: 1040px; }
+.des-root { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+.des-contexto { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; }
+
+/* Indicadores */
+.des-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.des-kpis .kpi { min-width: 0; }
+@media (min-width: 720px) { .des-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* Distribuição das habilidades por nível */
+.des-dist { display: flex; height: 10px; border-radius: 999px; overflow: hidden; background: var(--line); gap: 2px; }
+.des-dist span { display: block; min-width: 6px; }
+.des-dist .err, .des-legenda i.err { background: var(--err); }
+.des-dist .warn, .des-legenda i.warn { background: var(--warn); }
+.des-dist .ok, .des-legenda i.ok { background: var(--ok); }
+.des-dist .none, .des-legenda i.none { background: var(--ink-3); opacity: .5; }
+.des-legenda { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--ink-2); }
+.des-legenda span { display: inline-flex; align-items: center; gap: 6px; }
+.des-legenda i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.des-legenda strong { color: var(--ink); }
+
+/* Abas */
+.des-abas { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.des-aba {
+  appearance: none; background: none; border: 0; cursor: pointer;
+  padding: 10px 14px; font: inherit; font-weight: 650; font-size: 14px; color: var(--ink-3);
+  border-bottom: 3px solid transparent; margin-bottom: -1px;
 }
+.des-aba.on { color: var(--ink); border-bottom-color: var(--y-500); }
+.des-aba:focus-visible { outline: 2px solid var(--y-600); outline-offset: -2px; border-radius: 6px; }
+.des-chip-n {
+  display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 2px;
+  border-radius: 999px; background: rgba(16, 24, 40, .08); font-size: 11px; font-weight: 700; text-align: center;
+}
+.chip.on .des-chip-n { background: rgba(16, 24, 40, .16); }
+.des-corpo { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* Cartão de habilidade */
+.des-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+@media (min-width: 900px) { .des-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 .des-hab {
-  display: grid;
-  grid-template-columns: minmax(0, 1.7fr) 110px minmax(140px, .9fr);
-  gap: 12px;
-  align-items: center;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: var(--surface);
+  display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  padding: 12px 14px; border: 1px solid var(--line); border-left-width: 4px;
+  border-radius: var(--r); background: var(--surface);
 }
-.des-hab + .des-hab { margin-top: 2px; }
-.des-hab.dominio { border-left: 3px solid var(--ok); }
-.des-hab.reforco { border-left: 3px solid var(--err); background: var(--err-bg); }
-.des-info { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.des-hab.dominio { border-left-color: var(--ok); }
+.des-hab.meio { border-left-color: var(--warn); }
+.des-hab.reforco { border-left-color: var(--err); background: var(--err-bg); }
+.des-hab.sem { border-left-color: var(--ink-3); }
+.des-hab-top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .des-cod { font-weight: 800; font-size: 14px; letter-spacing: .01em; }
-.des-desc { font-size: 13px; color: var(--ink-2); }
-.des-nums { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--ink-2); }
-.des-nums strong { color: var(--ink); }
-.des-pct { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
-.des-pct > strong { font-size: 15px; }
-.des-pct .perf { width: 100%; }
+.des-hab-pct { margin-left: auto; font-size: 18px; letter-spacing: -.01em; }
+.des-desc { margin: 0; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.des-hab .perf { width: 100%; }
+.des-hab-foot { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-2); }
+.des-hab-foot strong { color: var(--ink); }
+.des-hab-foot .des-meta { color: var(--ink-3); flex-basis: 100%; overflow-wrap: anywhere; }
+
+/* Por aluno */
+.des-alunos-filtros { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+@media (min-width: 720px) { .des-alunos-filtros { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); align-items: end; } }
+
+.des-aluno { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); overflow: hidden; }
+.des-aluno.aberto { border-color: var(--y-300); }
+.des-aluno-head {
+  appearance: none; width: 100%; background: none; border: 0; cursor: pointer; text-align: left; font: inherit; color: inherit;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(86px, 150px) 16px; align-items: center; gap: 10px;
+  padding: 11px 12px;
+}
+.des-aluno-head:hover { background: var(--bg); }
+.des-aluno-head:focus-visible { outline: 2px solid var(--y-600); outline-offset: -2px; }
+.des-aluno-nome { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.des-aluno-nome strong { font-size: 14px; overflow-wrap: anywhere; }
+.des-aluno-pct { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.des-aluno-pct strong { font-size: 15px; }
+.des-aluno-pct .perf { width: 100%; }
+.des-chevron { color: var(--ink-3); display: grid; place-items: center; transition: transform .15s ease; }
+.des-aluno.aberto .des-chevron { transform: rotate(90deg); }
+.des-aluno-corpo { display: flex; flex-direction: column; gap: 10px; padding: 4px 12px 12px; border-top: 1px solid var(--line); background: var(--bg); }
+.des-aluno-corpo .alert { margin-top: 10px; }
 .des-destaque { align-items: flex-start; }
 
-@media (max-width: 640px) {
-  .des-hab { grid-template-columns: 1fr; gap: 7px; }
-  .des-nums { flex-direction: row; gap: 14px; }
-  .des-pct { align-items: flex-start; }
-  .des-pct > strong { font-size: 14px; }
+@media (max-width: 480px) {
+  .des-aluno-head { grid-template-columns: auto minmax(0, 1fr) 16px; }
+  .des-aluno-pct { grid-column: 2; grid-row: 2; align-items: stretch; flex-direction: row; align-items: center; gap: 10px; }
+  .des-aluno-pct .perf { flex: 1; }
+  .des-chevron { grid-column: 3; grid-row: 1; }
 }
+
+.des-root :focus-visible { outline: 2px solid var(--y-600); outline-offset: 2px; }
