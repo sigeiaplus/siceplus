@@ -10,7 +10,19 @@
    vazias alinhadas, A B C D no cabeçalho de cada coluna, linhas pontilhadas
    entre as questões e QR Code no rodapé.
    O cartão não exibe a marca SICEP+: só escola, aluno, turma, avaliação
-   e o caderno. Os 4 quadrados pretos e o QR Code são obrigatórios.
+   e o caderno. Os 4 quadrados pretos são obrigatórios.
+
+   Modos de exportação (opções de montarCartaoSvg, a grade NUNCA muda):
+   · modo 'completo'  → identificação (aluno, turma, data…) + grade + rodapé;
+   · modo 'gabarito'  → só os 4 quadrados, o cabeçalho A B C D, a numeração e as
+                        bolinhas (sem identificação nem instruções), para encaixar
+                        numa prova que já tem o próprio cabeçalho;
+   · qrModo 'junto'   → QR Code impresso no cartão (posição de geometria.js);
+   · qrModo 'separado'→ o cartão sai SEM o QR e, no lugar dele, com uma âncora de
+                        orientação (xadrez fino). O leitor decide a rotação do cartão
+                        pela densidade de tinta nessa área; sem a âncora uma folha de
+                        cabeça para baixo poderia ser lida do jeito errado. O QR sai à
+                        parte (montarQrSvg) para ser colado/impresso na prova.
    ============================================================ */
 
 import { FOLHA, MARCADOR, QR, REGIAO, GEOMETRIA_VERSAO, layoutCartao } from './geometria.js';
@@ -46,6 +58,49 @@ function qrModulos(qr) {
 }
 
 /**
+ * Âncora de orientação: xadrez de módulos de 1 mm preenchendo a MESMA área do QR.
+ * Tem a densidade de tinta de um QR (~50%) e nenhum padrão de localização, então
+ * não é confundida com QR Code. Só entra quando o QR sai separado do cartão.
+ */
+function ancoraOrientacao() {
+  const mod = 1;
+  const n = Math.round(QR.lado / mod);
+  const m = QR.lado / n;
+  let d = '';
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if ((r + c) % 2 === 0) d += `M${(QR.x + c * m).toFixed(3)} ${(QR.y + r * m).toFixed(3)}h${m.toFixed(3)}v${m.toFixed(3)}h-${m.toFixed(3)}z`;
+    }
+  }
+  return `<path d="${d}" fill="#000"/>
+    <rect x="${QR.x}" y="${QR.y}" width="${QR.lado}" height="${QR.lado}" fill="none" stroke="#000" stroke-width="0.3"/>`;
+}
+
+/**
+ * QR Code avulso (para colar/imprimir na prova): QR + margem branca de 4 mm, sem texto.
+ * @param {object} qr    objeto do qrcode-generator já montado (make())
+ * @param {number} [lado] lado do QR em mm (22 = mesmo tamanho do QR do cartão)
+ * @returns {{svg:string, larguraMm:number, alturaMm:number}}
+ */
+export function montarQrSvg(qr, lado = QR.lado) {
+  const margem = 4;
+  const T = lado + margem * 2;
+  const n = qr.getModuleCount();
+  const m = lado / n;
+  let d = '';
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (qr.isDark(r, c)) d += `M${(margem + c * m).toFixed(3)} ${(margem + r * m).toFixed(3)}h${(m + 0.01).toFixed(3)}v${(m + 0.01).toFixed(3)}h-${(m + 0.01).toFixed(3)}z`;
+    }
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${T} ${T}" width="${T}mm" height="${T}mm" preserveAspectRatio="xMidYMid meet" role="img" aria-label="QR Code do caderno">
+  <rect width="${T}" height="${T}" fill="#fff"/>
+  <path d="${d}" fill="#000"/>
+</svg>`;
+  return { svg, larguraMm: T, alturaMm: T };
+}
+
+/**
  * Campo de identificação: rótulo pequeno em cima, valor impresso (se houver) e
  * a linha de preenchimento embaixo. Tudo em mm.
  */
@@ -64,12 +119,16 @@ function campo(x, y, w, rotulo, valor, { linha = true, corpo = 3.2 } = {}) {
  * @param {string} d.escola @param {string} d.turma @param {string} d.disciplina
  * @param {string} d.avaliacao @param {string} d.data @param {string} d.caderno
  * @param {object|null} d.qr  objeto do qrcode-generator já montado (make())
+ * @param {'completo'|'gabarito'} [d.modo]    padrão 'completo'
+ * @param {'junto'|'separado'} [d.qrModo]     padrão 'junto'
  */
 export function montarCartaoSvg(d) {
   const L = layoutCartao(d.questoes, d.letras.length, d.letras);
   const { largura: W, altura: H } = FOLHA;
   const { lado, recuo } = MARCADOR;
   const f = (v) => +v.toFixed(3);
+  const completo = d.modo !== 'gabarito';
+  const qrJunto = d.qrModo !== 'separado';
 
   const marcadores = [
     [recuo, recuo], [W - recuo - lado, recuo],
@@ -78,7 +137,7 @@ export function montarCartaoSvg(d) {
 
   /* ---------- Identificação (não entra na grade: a grade vem de layoutCartao) ---------- */
   const X = 12, XF = W - 12, WCAB = XF - X;
-  const cab = `
+  const cab = !completo ? '' : `
     ${campo(X, 16, 88, 'ALUNO(A)', '', { corpo: 3.4 })}
     ${campo(X + 92, 16, 32, 'TURMA', d.turma)}
     ${campo(X + 128, 16, WCAB - 128, 'DATA', d.data)}
@@ -87,7 +146,7 @@ export function montarCartaoSvg(d) {
     ${campo(X + 106, 24.2, WCAB - 106, 'ESCOLA', d.escola)}
     <line x1="${X}" y1="30.4" x2="${XF}" y2="30.4" stroke="${TINTA}" stroke-width="0.35"/>`;
 
-  const qr = d.qr ? qrModulos(d.qr) : '';
+  const qr = qrJunto ? (d.qr ? qrModulos(d.qr) : '') : ancoraOrientacao();
 
   /* ---------- Colunas: A B C D no topo, faixa de numeração, linhas pontilhadas ---------- */
   const yTopo = REGIAO.y0;
@@ -124,7 +183,7 @@ export function montarCartaoSvg(d) {
 
   /* ---------- Rodapé: instruções, caderno e QR Code ---------- */
   const yR = REGIAO.y1;
-  const rodape = `
+  const rodape = !completo ? '' : `
     <line x1="${X}" y1="${yR + 1.6}" x2="${XF}" y2="${yR + 1.6}" stroke="${LINHA}" stroke-width="0.25"/>
     <text x="${X}" y="${yR + 6.2}" font-size="2.2" fill="${CINZA}" ${FONTE}>Preencha UMA única alternativa por questão,</text>
     <text x="${X}" y="${yR + 9.6}" font-size="2.2" fill="${CINZA}" ${FONTE}>cobrindo toda a bolinha, com caneta preta ou azul.</text>
