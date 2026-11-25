@@ -14,6 +14,7 @@ import homeScreen from './screens/home.js';
 import avaliacoesScreen from './screens/avaliacoes.js';
 import novaAvaliacaoScreen from './screens/nova-avaliacao.js';
 import avaliacaoDetalheScreen from './screens/avaliacao-detalhe.js';
+import chamadaScreen from './screens/chamada.js';
 import cartoesScreen from './screens/cartoes.js';
 import leituraScreen from './screens/leitura.js';
 import resultadosScreen from './screens/resultados.js';
@@ -34,6 +35,7 @@ const ROTAS = [
   { re: /^#\/avaliacoes$/, view: avaliacoesScreen, titulo: 'Avaliações' },
   { re: /^#\/avaliacoes\/nova$/, view: novaAvaliacaoScreen, titulo: 'Nova avaliação' },
   { re: /^#\/avaliacoes\/editar\/([\w-]+)$/, view: novaAvaliacaoScreen, titulo: 'Editar avaliação' },
+  { re: /^#\/avaliacoes\/chamada\/([\w-]+)(?:\/([\w-]+))?$/, view: chamadaScreen, titulo: 'Chamada' },
   { re: /^#\/avaliacoes\/([\w-]+)$/, view: avaliacaoDetalheScreen, titulo: 'Avaliação' },
   { re: /^#\/cartoes(?:\/([\w-]+))?$/, view: cartoesScreen, titulo: 'Cartões de respostas' },
   { re: /^#\/leitura\/([\w-]+)\/([\w-]+)$/, view: leituraScreen, titulo: 'Reler cartão' },

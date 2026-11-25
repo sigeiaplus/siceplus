@@ -698,3 +698,10 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
   .part-row { flex-direction: row; align-items: center; justify-content: space-between; }
   .part-seg { width: 270px; flex: none; }
 }
+
+/* ---------------- Tela de chamada ---------------- */
+.cham-list { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); overflow: hidden; }
+.cham-list .part-row:first-child { border-top: 0; }
+.cham-list .part-seg button { height: var(--tap); font-size: 15px; }
+.cham-turma { width: 100%; text-align: left; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.cham-voltar { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }

@@ -44,7 +44,10 @@ export default function avaliacoes() {
 
         <div class="av-foot">
           <span class="xs muted">${av.questoes.filter((q) => q.anulada).length ? `${av.questoes.filter((q) => q.anulada).length} questão(ões) anulada(s)` : ''}</span>
-          <a class="btn btn-outline btn-sm" href="#/avaliacoes/${esc(av.id)}">Abrir ${icon('chevron', 14)}</a>
+          <span class="row" style="gap:6px">
+            <a class="btn btn-outline btn-sm" href="#/avaliacoes/chamada/${esc(av.id)}">${icon('users', 14)} Chamada</a>
+            <a class="btn btn-outline btn-sm" href="#/avaliacoes/${esc(av.id)}">Abrir ${icon('chevron', 14)}</a>
+          </span>
         </div>
       </article>`;
   }
