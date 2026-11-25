@@ -3,8 +3,9 @@
 
    Tela própria, aberta pelo botão "Chamada" em Avaliações.
    - Uma turma por vez: avaliação com várias turmas pede para escolher a turma.
-   - Todos começam PENDENTES. Toque em Presente ou Falta; tocar de novo no
-     botão ativo volta o aluno para Pendente.
+   - Um único interruptor por aluno: verde = Presente, vermelho = Falta.
+   - O padrão é PRESENÇA: aluno sem registro aparece como Presente. O botão
+     "Registrar presenças" grava esses alunos como Presente de uma vez.
    - Quem fica com Falta continua com Falta até alguém mudar.
    - Grava no aparelho primeiro (funciona sem internet) e sincroniza depois.
    ============================================================ */
@@ -29,10 +30,10 @@ export default function chamada(params) {
       </div>`;
   }
 
+  // Padrão é presença: quem ainda não tem registro conta como presente na tela.
   const emblema = (rs) => `
-    <span class="badge ok">Presentes <strong>${rs.presentes}</strong></span>
-    <span class="badge err">Faltas <strong>${rs.ausentes}</strong></span>
-    <span class="badge warn">Pendentes <strong>${rs.pendentes}</strong></span>`;
+    <span class="badge ok">Presentes <strong>${rs.presentes + rs.pendentes}</strong></span>
+    <span class="badge err">Faltas <strong>${rs.ausentes}</strong></span>`;
 
   function telaTurmas(a) {
     return `
@@ -62,27 +63,24 @@ export default function chamada(params) {
     const tid = apl.turma_id;
     const p = store.participacaoDe(a.id, aluno.id, tid);
     const sit = p?.situacao || 'pendente';
+    const presente = sit !== 'ausente'; // sem registro = presente (padrão)
     const corrigido = store.alunoTemCartaoCorrigido(a.id, aluno.id, tid);
     const aguardando = p?.sync && p.sync !== 'sincronizado';
-    const botao = (v, rotulo, classe) => `
-      <button type="button" class="${sit === v ? `on ${classe}` : ''}" aria-pressed="${sit === v}"
-        data-marcar="${v}" data-aluno="${esc(aluno.id)}">${rotulo}</button>`;
+    const tags = [
+      corrigido ? '<span class="badge ok">Cartão corrigido</span>' : '',
+      corrigido && sit === 'ausente' ? '<span class="badge err">Inconsistente</span>' : '',
+      aguardando ? '<span class="badge y">Aguardando envio</span>' : '',
+      p?.substituida ? '<span class="badge y">Alterado em outro aparelho</span>' : '',
+    ].join('');
     return `
-      <div class="part-row" data-aluno-row="${esc(aluno.id)}">
+      <div class="part-row cham-row" data-aluno-row="${esc(aluno.id)}">
         <div class="part-nome">
-          <span class="small strong">${esc(aluno.nome_completo)}</span>
-          <span class="part-tags">
-            ${sit === 'pendente' ? '<span class="badge warn">Pendente</span>' : ''}
-            ${corrigido ? '<span class="badge ok">Cartão corrigido</span>' : ''}
-            ${corrigido && sit !== 'presente' ? '<span class="badge err">Inconsistente</span>' : ''}
-            ${aguardando ? '<span class="badge y">Aguardando envio</span>' : ''}
-            ${p?.substituida ? '<span class="badge y">Alterado em outro aparelho</span>' : ''}
-          </span>
+          <span class="cham-nome">${esc(aluno.nome_completo)}</span>
+          ${tags ? `<span class="part-tags">${tags}</span>` : ''}
         </div>
-        <div class="seg part-seg" role="group" aria-label="Chamada de ${esc(aluno.nome_completo)}">
-          ${botao('presente', 'Presente', 'ok')}
-          ${botao('ausente', 'Falta', 'err')}
-        </div>
+        <button type="button" class="cham-sw${presente ? ' on' : ''}" role="switch"
+          aria-checked="${presente}" aria-label="${esc(aluno.nome_completo)}: ${presente ? 'Presente' : 'Falta'}"
+          data-alternar data-aluno="${esc(aluno.id)}"><span class="cham-knob"></span></button>
       </div>`;
   }
 
@@ -95,7 +93,9 @@ export default function chamada(params) {
     const enviadas = store.ausenciasEnviadas(a.id, tid);
     const triOk = [1, 2, 3].includes(Number(a.trimestre));
     const varias = a.aplicacoes.length > 1;
-    const feitos = rs.presentes + rs.ausentes;
+    const semRegistro = rs.pendentes;
+    const inconsistentes = alunos.filter((al) => store.alunoTemCartaoCorrigido(a.id, al.id, tid)
+      && store.situacaoDoAluno(a.id, al.id, tid) === 'ausente').length;
 
     return `
       ${varias
@@ -114,17 +114,19 @@ export default function chamada(params) {
 
       <section class="card">
         <div class="part-sum">${emblema(rs)}</div>
-        <div class="progress" style="margin-top:10px">
-          <span style="width:${rs.total ? Math.round((feitos / rs.total) * 100) : 0}%"></span>
-        </div>
-        <p class="xs muted" style="margin:6px 0 0">${feitos} de ${rs.total} com chamada feita · ${rs.realizadas} avaliação(ões) realizada(s)</p>
-        ${rs.divergentes ? `<div class="alert warn" style="margin-top:8px">${icon('info', 16)}<span>${rs.divergentes} aluno(s) com cartão corrigido não estão como Presente. As respostas foram preservadas.</span></div>` : ''}
+        <p class="xs muted" style="margin:8px 0 0">${rs.total} aluno(s) · ${rs.realizadas} avaliação(ões) realizada(s)</p>
+        ${inconsistentes ? `<div class="alert warn" style="margin-top:8px">${icon('info', 16)}<span>${inconsistentes} aluno(s) com cartão corrigido estão com Falta. As respostas foram preservadas.</span></div>` : ''}
+        ${semRegistro ? `
+          <div class="alert warn" style="margin-top:8px">${icon('info', 16)}
+            <span>${semRegistro} aluno(s) ainda sem registro aparecem como Presente.</span>
+          </div>
+          <button class="btn btn-outline btn-sm" type="button" data-registrar style="margin-top:8px">Registrar presenças</button>` : ''}
       </section>
 
       <div class="cham-list">
         ${alunos.map((al) => linha(a, apl, al)).join('') || '<p class="xs muted" style="padding:12px">Nenhum aluno vinculado a esta turma.</p>'}
       </div>
-      <p class="xs muted">Toque em Presente ou Falta. Tocar de novo no botão marcado volta para Pendente. Marcar Presente não preenche respostas.</p>
+      <p class="xs muted">Verde = Presente, vermelho = Falta. Toque no interruptor para alternar. Marcar Presente não preenche respostas.</p>
 
       ${a.lancar_sided && (aEnviar.length || enviadas.length) ? `
         <section class="card">
@@ -155,14 +157,26 @@ export default function chamada(params) {
     if (escolha) { turmaSel = escolha.dataset.turma; pintar(); window.scrollTo?.(0, 0); return; }
     if (ev.target.closest('[data-turmas]')) { turmaSel = null; pintar(); return; }
 
-    const b = ev.target.closest('[data-marcar]');
+    const reg = ev.target.closest('[data-registrar]');
+    if (reg && turmaSel) {
+      const apl = store.aplicacaoDe(a, turmaSel);
+      const pend = store.alunosDaTurma(turmaSel).filter((al) => store.situacaoDoAluno(a.id, al.id, turmaSel) === 'pendente');
+      reg.disabled = true;
+      for (const al of pend) {
+        const r = await store.definirParticipacao({ avaliacao: a, aplicacao: apl, alunoId: al.id, situacao: 'presente' });
+        if (!r.ok) { toast(r.erro, 'err'); break; }
+      }
+      pintar();
+      return;
+    }
+
+    const b = ev.target.closest('[data-alternar]');
     if (b && turmaSel) {
       const apl = store.aplicacaoDe(a, turmaSel);
       const alunoId = b.dataset.aluno;
-      const atual = store.situacaoDoAluno(a.id, alunoId, turmaSel);
-      // Tocar no botão já marcado desfaz: o aluno volta para Pendente.
-      const situacao = atual === b.dataset.marcar ? 'pendente' : b.dataset.marcar;
-      b.closest('[data-aluno-row]')?.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+      // Sem registro conta como presente: o toque leva para Falta; de Falta volta para Presente.
+      const situacao = store.situacaoDoAluno(a.id, alunoId, turmaSel) === 'ausente' ? 'presente' : 'ausente';
+      b.disabled = true;
 
       let r = await store.definirParticipacao({ avaliacao: a, aplicacao: apl, alunoId, situacao });
       if (r.precisaConfirmar) {
