@@ -186,7 +186,7 @@ export async function detectarRecursos() {
   const recursos = {
     prazo: false, faixas: false, anulada: false, situacao: false, status: false,
     turma_disciplina: false, revisado: false, enviado: false, trimestre: false,
-    habilidade_bncc: false, habilidades: false,
+    habilidade_bncc: false, habilidades: false, participacao: false,
   };
 
   const teste = async (path, chave) => {
@@ -211,6 +211,8 @@ export async function detectarRecursos() {
     teste('sicep_questoes?select=habilidade_bncc', 'habilidade_bncc'),
     // Etapa 4B: habilidades do planejamento (SIDED+). Sem tabela/RLS, o recurso fica desligado.
     teste('habilidades_planejamento?select=codigo', 'habilidades'),
+    // Controle de presença/ausência/pendência: só liga quando a tabela existe no banco.
+    teste('sicep_participacao?select=id,situacao,atualizado_em,enviado_sided_em', 'participacao'),
   ]);
 
   return recursos;
@@ -833,6 +835,52 @@ export async function carregarResultados(usuarioId) {
   return linhas;
 }
 
+/* ---------------- Participação (presente / ausente / pendente) ---------------- */
+
+/** Participações das avaliações do professor. Falta de linha = PENDENTE. */
+export async function carregarParticipacoes(usuarioId) {
+  const avs = await api(`sicep_avaliacoes?professor_id=eq.${usuarioId}&select=id`) || [];
+  if (!avs.length) return [];
+  const ids = avs.map((a) => a.id).join(',');
+  return await api(`sicep_participacao?avaliacao_id=in.(${ids})&select=*`) || [];
+}
+
+/**
+ * Grava a participação de um aluno SEM sobrescrever alteração mais nova da nuvem.
+ * Uma linha por (avaliação, aluno, turma): a chave única impede duplicidade.
+ *  1) PATCH condicionado a `atualizado_em <= o deste aparelho` (atômico no servidor);
+ *  2) sem linha para atualizar: cria, ignorando duplicata criada por outro aparelho no meio;
+ *  3) ainda sem retorno: a nuvem tem versão mais nova; devolve ela, sem alterar nada.
+ * Devolve { aplicado, linha }. Repetir o envio é seguro.
+ */
+export async function gravarParticipacaoSemSobrescrever(reg, { zerarEnvio = false } = {}) {
+  const filtro = `avaliacao_id=eq.${reg.avaliacao_id}&aluno_id=eq.${reg.aluno_id}&turma_id=eq.${reg.turma_id}`;
+  const corpo = { situacao: reg.situacao, atualizado_em: reg.atualizado_em, atualizado_por: reg.atualizado_por };
+  if (zerarEnvio) corpo.enviado_sided_em = null;
+
+  const atualizadas = await api(
+    `sicep_participacao?${filtro}&atualizado_em=lte.${encodeURIComponent(reg.atualizado_em)}`,
+    { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(corpo) }
+  ) || [];
+  if (atualizadas.length) return { aplicado: true, linha: atualizadas[0] };
+
+  const criadas = await api('sicep_participacao?on_conflict=avaliacao_id,aluno_id,turma_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+    body: JSON.stringify({
+      id: reg.id,
+      avaliacao_id: reg.avaliacao_id,
+      aluno_id: reg.aluno_id,
+      turma_id: reg.turma_id,
+      ...corpo,
+    }),
+  }) || [];
+  if (criadas.length) return { aplicado: true, linha: criadas[0] };
+
+  const [servidor] = await api(`sicep_participacao?${filtro}&select=*&limit=1`) || [];
+  return { aplicado: false, linha: servidor || null };
+}
+
 /**
  * Cria o resultado com o id vindo do cliente (`registro.id`).
  * - Mesma gravação repetida (mesmo id): não duplica e não sobrescreve.
@@ -985,29 +1033,38 @@ export async function enviarNotasSided({ avaliacaoSicep, turma, turmaDisciplinaI
   const conflitos = [];
   let itensGravar = items;
   const existentes = new Map();
+  const jaIguais = [];
   if (!criada && items.length) {
     const ids = items.map((i) => i.aluno_id).join(',');
     const linhas = await api(
-      `notas?avaliacao_id=eq.${sided.id}&aluno_id=in.(${ids})&select=aluno_id,nota`
+      `notas?avaliacao_id=eq.${sided.id}&aluno_id=in.(${ids})&select=aluno_id,nota,ausente`
     ) || [];
-    linhas.forEach((l) => existentes.set(l.aluno_id, l.nota));
+    linhas.forEach((l) => existentes.set(l.aluno_id, l));
     itensGravar = items.filter((i) => {
-      const atual = existentes.get(i.aluno_id);
+      const linha = existentes.get(i.aluno_id);
+      if (!linha) return true;
+      // Ausência sem nota (controle de participação): nunca por cima de nota já lançada.
+      if (i.nota == null) {
+        if (linha.ausente) { jaIguais.push(i.aluno_id); return false; }
+        if (linha.nota == null) return true;
+        conflitos.push(i.aluno_id);
+        return false;
+      }
+      const atual = linha.nota;
       if (atual == null) return true;
-      if (Math.abs(Number(atual) - Number(i.nota)) < 0.005) return false;
+      if (Math.abs(Number(atual) - Number(i.nota)) < 0.005) { jaIguais.push(i.aluno_id); return false; }
       conflitos.push(i.aluno_id);
       return false;
     });
   }
-  const jaIguais = items.filter((i) => existentes.has(i.aluno_id) && existentes.get(i.aluno_id) != null
-    && !conflitos.includes(i.aluno_id)).map((i) => i.aluno_id);
 
   const notas = itensGravar.map((i) => ({
     avaliacao_id: sided.id,
     aluno_id: i.aluno_id,
     nota: i.nota,
     ausente: i.situacao === 'ausente',
-    nao_realizado: ['abstencao', 'nao_entregue'].includes(i.situacao),
+    // Ausência vinda do controle de participação vai como AUSENTE e NÃO REALIZADO.
+    nao_realizado: i.nao_realizado === true || ['abstencao', 'nao_entregue'].includes(i.situacao),
     turma_id: turma.id,
     turma_disciplina_id: turmaDisciplinaId || null,
   }));

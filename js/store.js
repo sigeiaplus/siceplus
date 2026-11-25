@@ -27,6 +27,19 @@ export const SITUACOES = {
   cartao_invalido: { rotulo: 'Cartão inválido ou danificado', geraNota: false, tipo: 'err', exigeColuna: true },
 };
 
+// Participação do aluno na avaliação. É independente das respostas do cartão.
+export const SITUACOES_PARTICIPACAO = {
+  pendente: { rotulo: 'Pendente', tipo: 'warn' },
+  presente: { rotulo: 'Presente', tipo: 'ok' },
+  ausente: { rotulo: 'Ausente', tipo: 'err' },
+};
+
+// A nuvem devolve "…+00:00"; o aparelho grava "…Z". Normaliza para comparar como texto.
+const isoDe = (v) => {
+  const t = Date.parse(v);
+  return Number.isNaN(t) ? String(v || '') : new Date(t).toISOString();
+};
+
 const CHAVE_DEMO_ANTIGA = 'sicep.demo.v2';
 
 const vazio = () => ({
@@ -40,6 +53,8 @@ const vazio = () => ({
   // Habilidades do planejamento (SIDED+), por vínculo turma × disciplina.
   habilidades: [],
   resultados: [],
+  // Presente/ausente/pendente por aluno e avaliação. Sem linha = PENDENTE.
+  participacoes: [],
   scans: [],
   fila: [],
   erros: [],
@@ -48,7 +63,7 @@ const vazio = () => ({
 let db = vazio();
 let estado = 'carregando'; // carregando | sem-config | sem-sessao | erro | pronto
 let erro = null;
-let recursos = { prazo: false, faixas: false, anulada: false, situacao: false, turma_disciplina: false, trimestre: false, habilidade_bncc: false, habilidades: false };
+let recursos = { prazo: false, faixas: false, anulada: false, situacao: false, turma_disciplina: false, trimestre: false, habilidade_bncc: false, habilidades: false, participacao: false };
 // Motivo legível quando a leitura das habilidades falhou (RLS, tabela ausente, rede).
 let erroHabilidadesMsg = null;
 let origem = 'nuvem'; // nuvem | cache — de onde vieram os dados em memória
@@ -194,13 +209,14 @@ export async function iniciar() {
           habilidades = copia?.db?.habilidades || [];
         }
       }
-      const [avs, ress] = await comLimite(Promise.all([
+      const [avs, ress, parts] = await comLimite(Promise.all([
         nuvem.carregarAvaliacoes(remota.usuario_id, novosRecursos),
         nuvem.carregarResultados(remota.usuario_id),
+        novosRecursos.participacao ? nuvem.carregarParticipacoes(remota.usuario_id) : Promise.resolve([]),
       ]), LIMITE_NUVEM_MS);
       recursos = { ...novosRecursos, habilidades: !falhaHabilidades || habilidades.length > 0 };
       erroHabilidadesMsg = falhaHabilidades ? falhaHabilidades.message : null;
-      db = montar(ctx, avs, ress, habilidades);
+      db = montar(ctx, avs, ress, habilidades, parts);
       estado = 'pronto';
       erro = null;
       origem = 'nuvem';
@@ -265,6 +281,10 @@ async function gravarCacheLocal() {
     // A cópia local só recebe o que o servidor já confirmou. Resultado ainda na fila
     // (pendente/sincronizando/erro) vive na fila, não aqui — e é reaplicado ao abrir.
     resultados: db.resultados.filter((r) => !r.sync || r.sync === 'sincronizado'),
+    // Idem: participação ainda na fila vive na fila e é reaplicada ao abrir.
+    participacoes: db.participacoes
+      .filter((p) => !p.sync || p.sync === 'sincronizado')
+      .map(({ sync, substituida, ...resto }) => resto),
   });
   if (ok) cacheEm = new Date().toISOString();
   return ok;
@@ -279,7 +299,7 @@ export async function recarregar() {
   return iniciar();
 }
 
-function montar(ctx, avs, resultados, habilidades = []) {
+function montar(ctx, avs, resultados, habilidades = [], participacoes = []) {
   const sessao = {
     usuario_id: ctx.sessao.usuario_id,
     professor_id: ctx.sessao.professor_id,
@@ -358,6 +378,16 @@ function montar(ctx, avs, resultados, habilidades = []) {
     habilidades,
     avaliacoes,
     resultados: resultadosMapeados,
+    participacoes: participacoes.map((p) => ({
+      id: p.id,
+      avaliacao_id: p.avaliacao_id,
+      aluno_id: p.aluno_id,
+      turma_id: p.turma_id,
+      situacao: SITUACOES_PARTICIPACAO[p.situacao] ? p.situacao : 'pendente',
+      atualizado_em: isoDe(p.atualizado_em),
+      atualizado_por: p.atualizado_por || null,
+      enviado_em: p.enviado_sided_em ? isoDe(p.enviado_sided_em) : null,
+    })),
     scans: [],
     fila: [],
     erros: [],
@@ -867,6 +897,7 @@ export async function excluirAvaliacao(id) {
 
   db.avaliacoes = db.avaliacoes.filter((a) => a.id !== id);
   db.resultados = db.resultados.filter((r) => r.avaliacao_id !== id);
+  db.participacoes = db.participacoes.filter((p) => p.avaliacao_id !== id);
   atualizarCacheLocal();
   return { ok: true, resultados };
 }
@@ -1320,6 +1351,219 @@ export async function enviarAoSided(avaliacaoId, turmaId, resultadoIds = null) {
   return { ok: falhas.length === 0, enviados: enviadosIds.length, falhas, aviso };
 }
 
+/* ---------------- Participação: presente / ausente / pendente ---------------- */
+
+const chaveParticipacao = (p) => `part|${p.avaliacao_id}|${p.aluno_id}|${p.turma_id}`;
+
+export function participacaoDisponivel() { return Boolean(recursos.participacao); }
+
+export function participacaoDe(avaliacaoId, alunoId, turmaId) {
+  return db.participacoes.find((p) => p.avaliacao_id === avaliacaoId && p.aluno_id === alunoId && p.turma_id === turmaId) || null;
+}
+
+/** Sem linha = PENDENTE (situação inicial: ninguém é considerado presente sozinho). */
+export function situacaoDoAluno(avaliacaoId, alunoId, turmaId) {
+  return participacaoDe(avaliacaoId, alunoId, turmaId)?.situacao || 'pendente';
+}
+
+/** Cartão já corrigido (resultado normal) — dado que a participação NUNCA apaga. */
+export function alunoTemCartaoCorrigido(avaliacaoId, alunoId, turmaId) {
+  return resultadoDoAluno(avaliacaoId, alunoId, turmaId)?.situacao === 'normal';
+}
+
+/**
+ * Indicadores da turma. Presença e avaliação concluída são coisas distintas:
+ * `realizadas` conta cartões corrigidos; `divergentes` = corrigidos que não estão como PRESENTE.
+ */
+export function resumoParticipacao(av, turmaId) {
+  const alunos = alunosDaTurma(turmaId);
+  const r = { total: alunos.length, presentes: 0, ausentes: 0, pendentes: 0, realizadas: 0, divergentes: 0 };
+  alunos.forEach((a) => {
+    const sit = situacaoDoAluno(av.id, a.id, turmaId);
+    if (sit === 'presente') r.presentes += 1;
+    else if (sit === 'ausente') r.ausentes += 1;
+    else r.pendentes += 1;
+    if (alunoTemCartaoCorrigido(av.id, a.id, turmaId)) {
+      r.realizadas += 1;
+      if (sit !== 'presente') r.divergentes += 1;
+    }
+  });
+  return r;
+}
+
+const MSG_PARTICIPACAO_SEM_TABELA = 'O banco ainda não tem a tabela sicep_participacao. Execute a migração SQL (sql/001_sicep_participacao.sql) para usar o controle de presença.';
+
+/**
+ * Altera a participação de UM aluno. Grava no aparelho e na fila ANTES de qualquer rede.
+ * Se o aluno já tem cartão corrigido e vai para AUSENTE/PENDENTE, devolve `precisaConfirmar`
+ * e nada muda até a chamada repetida com `confirmado: true`. As respostas nunca são tocadas.
+ */
+export async function definirParticipacao({ avaliacao: av, aplicacao: apl, alunoId, situacao, confirmado = false }) {
+  if (!av || !apl) return { ok: false, erro: 'Avaliação ou turma não identificada.' };
+  if (!recursos.participacao) return { ok: false, erro: MSG_PARTICIPACAO_SEM_TABELA };
+  if (!SITUACOES_PARTICIPACAO[situacao]) return { ok: false, erro: 'Situação inválida.' };
+  if (avaliacaoPendente(av)) return { ok: false, erro: av.sync === 'conflito' ? MSG_AVALIACAO_EM_CONFLITO : MSG_AVALIACAO_PENDENTE };
+  if (!db.alunos.some((a) => a.id === alunoId && a.turma_id === apl.turma_id)) {
+    return { ok: false, erro: 'Este aluno não pertence à turma da avaliação.' };
+  }
+
+  const atual = participacaoDe(av.id, alunoId, apl.turma_id);
+  if ((atual?.situacao || 'pendente') === situacao) return { ok: true, semMudanca: true, participacao: atual };
+
+  if (situacao !== 'presente' && alunoTemCartaoCorrigido(av.id, alunoId, apl.turma_id) && !confirmado) {
+    return {
+      ok: false,
+      precisaConfirmar: true,
+      motivo: `Este aluno já tem cartão corrigido. Marcar como ${SITUACOES_PARTICIPACAO[situacao].rotulo.toUpperCase()} NÃO apaga as respostas, mas deixa o registro inconsistente. Confirmar mesmo assim?`,
+    };
+  }
+
+  const usuarioId = db.sessao.usuario_id;
+  // Sempre mais novo que o que este aparelho já conhece (relógio atrasado não perde para a própria nuvem).
+  let agora = new Date().toISOString();
+  if (atual && agora <= atual.atualizado_em) agora = new Date(Date.parse(atual.atualizado_em) + 1).toISOString();
+
+  const local = {
+    id: atual?.id || nuvem.novoUuid(),
+    avaliacao_id: av.id,
+    aluno_id: alunoId,
+    turma_id: apl.turma_id,
+    situacao,
+    atualizado_em: agora,
+    atualizado_por: usuarioId,
+    enviado_em: null, // mudou a situação: o que foi enviado ao SIDED+ deixa de valer como "enviado"
+  };
+  const anterior = atual ? { ...atual } : null;
+  const aplicarNaMemoria = (linha) => {
+    const p = participacaoDe(av.id, alunoId, apl.turma_id);
+    if (p) { Object.keys(p).forEach((k) => { if (k !== 'sync') delete p[k]; }); Object.assign(p, linha); }
+    else db.participacoes.unshift({ ...linha });
+  };
+  const desfazerNaMemoria = () => {
+    if (anterior) aplicarNaMemoria(anterior);
+    else db.participacoes = db.participacoes.filter((p) => !(p.avaliacao_id === av.id && p.aluno_id === alunoId && p.turma_id === apl.turma_id));
+  };
+
+  const item = await filaSync.enfileirarParticipacao(usuarioId, {
+    chave_alvo: chaveParticipacao(local),
+    avaliacao_id: av.id,
+    local,
+  });
+
+  // Plano B: navegador sem IndexedDB. Só funciona online.
+  if (!item) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return { ok: false, erro: 'Sem internet e este navegador não permite guardar a alteração no aparelho. Nada foi salvo.' };
+    }
+    try {
+      const r = await nuvem.gravarParticipacaoSemSobrescrever(local, { zerarEnvio: true });
+      aplicarNaMemoria(r.aplicado || !r.linha ? local : {
+        ...local, id: r.linha.id, situacao: r.linha.situacao, atualizado_em: isoDe(r.linha.atualizado_em), substituida: true,
+      });
+    } catch (e) {
+      return { ok: false, erro: 'Falha ao gravar na nuvem: ' + (e?.message || e) };
+    }
+    atualizarCacheLocal();
+    return { ok: true, participacao: participacaoDe(av.id, alunoId, apl.turma_id) };
+  }
+
+  aplicarNaMemoria({ ...local, sync: 'pendente' });
+  await atualizarEstadoDaFila();
+  await esperarNoMaximo(sincronizarFila(), ESPERA_MAX_SALVAR_MS);
+  const atualItem = (await filaSync.listar(usuarioId)).find((i) => i.seq === item.seq);
+
+  if (atualItem?.status === 'erro' && atualItem.permanente) {
+    await filaSync.descartar(item.seq);
+    desfazerNaMemoria();
+    await atualizarEstadoDaFila();
+    return { ok: false, erro: `Falha ao gravar na nuvem: ${atualItem.erro || 'recusado.'}` };
+  }
+
+  const p = participacaoDe(av.id, alunoId, apl.turma_id);
+  if (atualItem?.status === 'sincronizado') return { ok: true, participacao: p, substituida: Boolean(p?.substituida) };
+  const offlineAgora = typeof navigator !== 'undefined' && navigator.onLine === false;
+  return {
+    ok: true,
+    pendente: true,
+    participacao: p,
+    mensagem: offlineAgora
+      ? 'Sem internet: salvo neste aparelho. Será enviado quando a conexão voltar.'
+      : 'Salvo neste aparelho. O envio à nuvem será refeito automaticamente.',
+  };
+}
+
+/** Ausências já gravadas na nuvem e ainda não enviadas ao SIDED+. */
+export function ausenciasParaEnviar(avaliacaoId, turmaId) {
+  const idsAlunos = new Set(alunosDaTurma(turmaId).map((a) => a.id));
+  return db.participacoes.filter((p) => p.avaliacao_id === avaliacaoId && p.turma_id === turmaId
+    && p.situacao === 'ausente' && !p.enviado_em && idsAlunos.has(p.aluno_id)
+    && (!p.sync || p.sync === 'sincronizado'));
+}
+
+export function ausenciasEnviadas(avaliacaoId, turmaId) {
+  return db.participacoes.filter((p) => p.avaliacao_id === avaliacaoId && p.turma_id === turmaId
+    && p.situacao === 'ausente' && p.enviado_em);
+}
+
+/**
+ * Envia ao SIDED+ as AUSÊNCIAS confirmadas (notas.ausente = true e notas.nao_realizado = true, sem nota). Só com internet e só
+ * quando o professor pede. PENDENTE e PRESENTE nunca são enviados. Nota já lançada no SIDED+ não é tocada.
+ */
+export async function enviarAusenciasAoSided(avaliacaoId, turmaId) {
+  const av = avaliacao(avaliacaoId);
+  const apl = aplicacaoDe(av, turmaId);
+  if (!av || !apl) return { ok: false, erro: 'Avaliação/turma não encontrada.' };
+  if (avaliacaoPendente(av)) return { ok: false, erro: av.sync === 'conflito' ? MSG_AVALIACAO_EM_CONFLITO : MSG_AVALIACAO_PENDENTE };
+  if (!av.lancar_sided) return { ok: false, erro: 'Esta avaliação não está marcada para lançar no SIDED+.' };
+  if (![1, 2, 3].includes(Number(av.trimestre))) return { ok: false, erro: 'Esta avaliação não tem trimestre definido. Defina o trimestre antes de enviar.' };
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, erro: 'Sem conexão com a internet. O envio ao SIDED+ só é feito online.' };
+
+  const lista = ausenciasParaEnviar(av.id, turmaId);
+  if (!lista.length) return { ok: false, erro: 'Nenhuma ausência aguardando envio.' };
+
+  let r;
+  try {
+    r = await nuvem.enviarNotasSided({
+      avaliacaoSicep: { ...av, sided_avaliacao_id: av.sided_avaliacao_id || apl.sided_avaliacao_id },
+      turma: turma(turmaId),
+      turmaDisciplinaId: apl.turma_disciplina_id,
+      professorId: apl.professor_id,
+      trimestre: Number(av.trimestre),
+      items: lista.map((p) => ({ aluno_id: p.aluno_id, nota: null, situacao: 'ausente', nao_realizado: true })),
+    });
+  } catch (e) {
+    return { ok: false, erro: 'Falha ao enviar as ausências ao SIDED+: ' + (e?.message || e) };
+  }
+
+  const enviadosAlunos = new Set(r.enviadosAlunos);
+  const falhas = lista.filter((p) => !enviadosAlunos.has(p.aluno_id)).map((p) => ({
+    aluno_id: p.aluno_id,
+    erro: r.conflitos.includes(p.aluno_id)
+      ? 'Já existe nota lançada no SIDED+ para este aluno. Não foi sobrescrita.'
+      : 'Não foi gravada no SIDED+.',
+  }));
+  const enviadas = lista.filter((p) => enviadosAlunos.has(p.aluno_id));
+
+  let aviso = null;
+  if (enviadas.length) {
+    const agora = new Date().toISOString();
+    enviadas.forEach((p) => { p.enviado_em = agora; });
+    try {
+      await nuvem.api(
+        `sicep_participacao?avaliacao_id=eq.${av.id}&turma_id=eq.${turmaId}&aluno_id=in.(${enviadas.map((p) => p.aluno_id).join(',')})`,
+        { method: 'PATCH', body: JSON.stringify({ enviado_sided_em: agora }) }
+      );
+    } catch (e) {
+      aviso = 'As ausências foram gravadas no SIDED+, mas não consegui registrar o envio no SICEP+. Reenviar é seguro (não duplica).';
+    }
+    apl.sided_avaliacao_id = r.sided_avaliacao_id;
+    const alvoAv = db.avaliacoes.find((x) => x.id === av.id);
+    if (alvoAv && (alvoAv.turmas_ids || []).length <= 1) alvoAv.sided_avaliacao_id = r.sided_avaliacao_id;
+    atualizarCacheLocal();
+  }
+  return { ok: falhas.length === 0, enviados: enviadas.length, falhas, aviso };
+}
+
 /* ---------------- Sincronização ---------------- */
 
 export function fila() { return [...db.fila]; }
@@ -1373,11 +1617,12 @@ async function atualizarEstadoDaFila() {
   if (uid == null) { contagemFila = zeroFila(); notificarFila(); return; }
 
   const itens = await filaSync.listar(uid);
-  const deResultado = itens.filter((i) => !ehItemDeAvaliacao(i));
+  const deParticipacao = itens.filter((i) => i.tipo === 'participacao');
+  const deResultado = itens.filter((i) => !ehItemDeAvaliacao(i) && i.tipo !== 'participacao');
   const grupos = itensPorAvaliacao(itens);
 
   const c = zeroFila();
-  deResultado.forEach((i) => { c[i.status] = (c[i.status] || 0) + 1; c.total += 1; });
+  [...deResultado, ...deParticipacao].forEach((i) => { c[i.status] = (c[i.status] || 0) + 1; c.total += 1; });
   grupos.forEach((lista) => { const st = statusAgregado(lista); c[st] += 1; c.total += 1; });
   c.aberto = c.pendente + c.sincronizando + c.erro + c.conflito;
   contagemFila = c;
@@ -1391,6 +1636,18 @@ async function atualizarEstadoDaFila() {
   db.resultados.forEach((r) => {
     if (emAberto.has(r.id)) r.sync = emAberto.get(r.id);
     else if (r.sync) r.sync = feitos.has(r.id) ? 'sincronizado' : undefined;
+  });
+
+  const partAberta = new Map();
+  const partFeita = new Set();
+  deParticipacao.forEach((i) => {
+    if (i.status === 'sincronizado') partFeita.add(i.chave_alvo);
+    else partAberta.set(i.chave_alvo, i.status);
+  });
+  db.participacoes.forEach((p) => {
+    const k = chaveParticipacao(p);
+    if (partAberta.has(k)) p.sync = partAberta.get(k);
+    else if (p.sync) p.sync = partFeita.has(k) ? 'sincronizado' : undefined;
   });
 
   db.avaliacoes.forEach((av) => {
@@ -1416,6 +1673,17 @@ async function aplicarFilaNoEstado() {
   try {
     const itens = (await filaSync.listar(uid)).filter((i) => i.status !== 'sincronizado');
     itens.forEach((it) => {
+      if (it.tipo === 'participacao') {
+        const lp = it.local;
+        if (!lp) return;
+        const propria = db.participacoes.find((x) => chaveParticipacao(x) === it.chave_alvo);
+        // A nuvem já tem versão mais nova que a da fila: mostra a da nuvem; o item será barrado ao enviar.
+        if (propria && propria.atualizado_em > lp.atualizado_em) return;
+        const linhaP = { ...lp, sync: it.status };
+        if (propria) Object.assign(propria, linhaP);
+        else db.participacoes.unshift(linhaP);
+        return;
+      }
       const l = it.local;
       if (!l || ehItemDeAvaliacao(it)) return; // avaliações são tratadas logo abaixo
       const mesmaChave = (r) => r.avaliacao_id === l.avaliacao_id && r.aluno_id === l.aluno_id && r.turma_id === l.turma_id;
@@ -1453,6 +1721,7 @@ async function aplicarFilaNoEstado() {
 /** Chamado pela fila SÓ depois que o servidor confirmou a gravação de um item. */
 async function aoConfirmarNoServidor(item, linha) {
   if (ehItemDeAvaliacao(item)) { await aoConfirmarAvaliacao(item, linha); return; }
+  if (item.tipo === 'participacao') { await aoConfirmarParticipacao(item, linha); return; }
   const r = db.resultados.find((x) => x.id === item.resultado_id);
   if (r && linha?.created_at) r.criado_em = linha.created_at;
   await atualizarEstadoDaFila();   // marca 'sincronizado' (ou mantém pendente se há operação mais nova)
@@ -1462,6 +1731,35 @@ async function aoConfirmarNoServidor(item, linha) {
   if (r && r.sync === 'sincronizado' && db.sessao) {
     const { sync, ...confirmada } = r;
     await offline.gravar('resultados', db.sessao.usuario_id, r.id, confirmada);
+  }
+  atualizarCacheLocal();
+}
+
+/**
+ * Participação confirmada pelo servidor. Se a nuvem tinha versão MAIS NOVA (outro aparelho),
+ * ela prevalece e a linha é marcada `substituida` para a tela avisar: nada é sobrescrito em silêncio.
+ */
+async function aoConfirmarParticipacao(item, retorno) {
+  const p = db.participacoes.find((x) => chaveParticipacao(x) === item.chave_alvo);
+  await atualizarEstadoDaFila();
+  if (!p) return;
+  const aberta = Boolean(p.sync) && p.sync !== 'sincronizado'; // há alteração local mais nova ainda na fila
+  const linha = retorno?.linha || null;
+  if (retorno?.aplicado) {
+    if (linha?.id) p.id = linha.id;
+  } else if (linha && !aberta) {
+    Object.assign(p, {
+      id: linha.id,
+      situacao: SITUACOES_PARTICIPACAO[linha.situacao] ? linha.situacao : 'pendente',
+      atualizado_em: isoDe(linha.atualizado_em),
+      atualizado_por: linha.atualizado_por || null,
+      enviado_em: linha.enviado_sided_em ? isoDe(linha.enviado_sided_em) : null,
+      substituida: true,
+    });
+  }
+  if (db.sessao && !aberta) {
+    const { sync, substituida, ...confirmada } = p;
+    await offline.gravar('participacoes', db.sessao.usuario_id, p.id, confirmada);
   }
   atualizarCacheLocal();
 }
@@ -1588,6 +1886,21 @@ export async function itensDaFila() {
           questoes: (i.local.questoes || []).length,
         } : null,
         turma: (i.local?.turmas_ids || []).map((t) => turma(t)?.nome).filter(Boolean).join(', '),
+      });
+      return;
+    }
+    if (i.tipo === 'participacao') {
+      linhas.push({
+        tipo: 'participacao',
+        seq: i.seq,
+        status: i.status,
+        tentativas: i.tentativas || 0,
+        erro: i.erro || null,
+        permanente: Boolean(i.permanente),
+        criado_em: i.criado_em,
+        aluno: `${aluno(i.local?.aluno_id)?.nome_completo || '—'} · presença: ${SITUACOES_PARTICIPACAO[i.local?.situacao]?.rotulo || '—'}`,
+        avaliacao: avaliacao(i.local?.avaliacao_id)?.titulo || '—',
+        turma: turma(i.local?.turma_id)?.nome || '',
       });
       return;
     }

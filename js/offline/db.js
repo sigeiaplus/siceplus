@@ -15,14 +15,14 @@
    ============================================================ */
 
 const NOME_BANCO = 'sicep-offline';
-const VERSAO_BANCO = 2;
+const VERSAO_BANCO = 3; // 3: loja `participacoes` (presente/ausente/pendente)
 export const VERSAO_ESQUEMA = 1;
 const LOJA_FILA = 'fila_sync'; // chave `seq` autoincrementada: a ordem de gravação é a ordem de envio
 
 // Lojas de dados por usuário. Chave da linha: `${usuario_id}|${id}`.
 export const LOJAS = [
   'meta', 'turmas', 'disciplinas', 'professores',
-  'turma_disciplinas', 'alunos', 'avaliacoes', 'questoes', 'resultados',
+  'turma_disciplinas', 'alunos', 'avaliacoes', 'questoes', 'resultados', 'participacoes',
 ];
 const LOJA_SESSAO = 'sessao'; // um único registro: id = 'atual'
 
@@ -170,6 +170,7 @@ export async function salvarCache(usuarioId, dados) {
     (dados.turma_disciplinas || []).forEach((x) => poe('turma_disciplinas', x.id, x));
     (dados.alunos || []).forEach((x) => poe('alunos', x.id, x));
     (dados.resultados || []).forEach((x) => poe('resultados', x.id, x));
+    (dados.participacoes || []).forEach((x) => poe('participacoes', x.id, x));
     (dados.avaliacoes || []).forEach((av) => {
       const { questoes, ...semQuestoes } = av;
       poe('avaliacoes', av.id, semQuestoes);
@@ -201,8 +202,8 @@ export async function lerCache(usuarioId) {
 
   const habilidades = (await ler('meta', usuarioId, 'habilidades')) || [];
 
-  const [turmas, disciplinas, professores, turma_disciplinas, alunos, avaliacoes, questoes, resultados] = await Promise.all(
-    ['turmas', 'disciplinas', 'professores', 'turma_disciplinas', 'alunos', 'avaliacoes', 'questoes', 'resultados']
+  const [turmas, disciplinas, professores, turma_disciplinas, alunos, avaliacoes, questoes, resultados, participacoes] = await Promise.all(
+    ['turmas', 'disciplinas', 'professores', 'turma_disciplinas', 'alunos', 'avaliacoes', 'questoes', 'resultados', 'participacoes']
       .map((n) => listar(n, usuarioId))
   );
 
@@ -226,6 +227,7 @@ export async function lerCache(usuarioId) {
       habilidades,
       avaliacoes: avaliacoesCompletas,
       resultados,
+      participacoes,
       scans: [], fila: [], erros: [],
     },
   };
@@ -332,8 +334,11 @@ export async function filaEnfileirar(usuarioId, item) {
 
     const todos = await aoRedor(loja.index('usuario_id').getAll(IDBKeyRange.only(usuarioId)));
     // Só resultados se fundem: itens de avaliação/questões (6E) não têm `resultado_id`.
-    const igual = item.resultado_id == null ? null
-      : todos.find((x) => x.resultado_id === item.resultado_id && STATUS_REGRAVAVEL.includes(x.status));
+    // Participação: uma operação em aberto por aluno/avaliação (a última escolha vale).
+    const igual = item.tipo === 'participacao'
+      ? todos.find((x) => x.tipo === 'participacao' && x.chave_alvo === item.chave_alvo && STATUS_REGRAVAVEL.includes(x.status))
+      : item.resultado_id == null ? null
+        : todos.find((x) => x.resultado_id === item.resultado_id && STATUS_REGRAVAVEL.includes(x.status));
     const agora = new Date().toISOString();
 
     if (igual) {

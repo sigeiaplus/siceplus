@@ -675,3 +675,26 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 }
 
 .des-root :focus-visible { outline: 2px solid var(--y-600); outline-offset: 2px; }
+
+/* ---------------- Participação (presente / ausente / pendente) ---------------- */
+.part-box { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.part-tit { margin: 0 0 8px; font-size: 15px; }
+.part-sum { display: flex; flex-wrap: wrap; gap: 6px; }
+.part-sum .badge strong { margin-left: 4px; }
+.part-list { margin-top: 10px; max-height: 52dvh; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r); }
+.part-row {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px; border-top: 1px solid var(--line);
+}
+.part-row:first-child { border-top: 0; }
+.part-nome { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.part-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.part-seg { display: flex; width: 100%; }
+.part-seg button { flex: 1 1 0; min-width: 0; height: 38px; }
+.part-seg button:disabled { opacity: .55; cursor: progress; }
+.seg button.on.ok { background: var(--ok-bg); color: var(--ok); }
+.seg button.on.warn { background: var(--warn-bg); color: var(--warn); }
+@media (min-width: 720px) {
+  .part-row { flex-direction: row; align-items: center; justify-content: space-between; }
+  .part-seg { width: 270px; flex: none; }
+}

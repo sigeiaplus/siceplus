@@ -20,6 +20,124 @@ export default function avaliacaoDetalhe(params) {
 
   const root = el('<div class="stack"></div>');
 
+  /* ---------------- Participação: presente / ausente / pendente ---------------- */
+
+  const SITUACOES_UI = [
+    { v: 'presente', rotulo: 'Presente', classe: 'ok' },
+    { v: 'ausente', rotulo: 'Ausente', classe: 'err' },
+    { v: 'pendente', rotulo: 'Pendente', classe: 'warn' },
+  ];
+
+  function blocoParticipacao(apl) {
+    const tid = apl.turma_id;
+    if (!store.participacaoDisponivel()) {
+      return `
+        <div class="part-box" data-part-box="${esc(tid)}">
+          <h3 class="part-tit">Participação dos alunos</h3>
+          <div class="alert warn">${icon('info', 16)}
+            <span>O banco ainda não tem a tabela <span class="mono xs">sicep_participacao</span>. Execute a migração SQL para controlar presente, ausente e pendente.</span>
+          </div>
+        </div>`;
+    }
+    const rs = store.resumoParticipacao(av, tid);
+    const alunos = store.alunosDaTurma(tid);
+    const aEnviar = store.ausenciasParaEnviar(av.id, tid);
+    const enviadas = store.ausenciasEnviadas(av.id, tid);
+    const triOk = [1, 2, 3].includes(Number(av.trimestre));
+
+    const linha = (a) => {
+      const p = store.participacaoDe(av.id, a.id, tid);
+      const sit = p?.situacao || 'pendente';
+      const corrigido = store.alunoTemCartaoCorrigido(av.id, a.id, tid);
+      const aguardando = p?.sync && p.sync !== 'sincronizado';
+      return `
+        <div class="part-row" data-aluno-row="${esc(a.id)}">
+          <div class="part-nome">
+            <span class="small strong">${esc(a.nome_completo)}</span>
+            <span class="part-tags">
+              ${corrigido ? '<span class="badge ok">Cartão corrigido</span>' : ''}
+              ${corrigido && sit !== 'presente' ? '<span class="badge err">Inconsistente</span>' : ''}
+              ${aguardando ? '<span class="badge warn">Aguardando envio</span>' : ''}
+              ${p?.substituida ? '<span class="badge y" title="Outro aparelho tinha uma alteração mais recente">Alterado em outro aparelho</span>' : ''}
+            </span>
+          </div>
+          <div class="seg part-seg" role="group" aria-label="Situação de ${esc(a.nome_completo)}">
+            ${SITUACOES_UI.map((o) => `
+              <button type="button" class="${sit === o.v ? `on ${o.classe}` : ''}" aria-pressed="${sit === o.v}"
+                data-part="${o.v}" data-aluno="${esc(a.id)}" data-turma="${esc(tid)}">${o.rotulo}</button>`).join('')}
+          </div>
+        </div>`;
+    };
+
+    return `
+      <div class="part-box" data-part-box="${esc(tid)}">
+        <h3 class="part-tit">Participação dos alunos</h3>
+        <div class="part-sum">
+          <span class="badge ok">Presentes <strong>${rs.presentes}</strong></span>
+          <span class="badge err">Ausentes <strong>${rs.ausentes}</strong></span>
+          <span class="badge warn">Pendentes <strong>${rs.pendentes}</strong></span>
+        </div>
+        <div class="kv-list" style="margin-top:6px">
+          <div><span class="k">Alunos vinculados</span><span class="v">${rs.total}</span></div>
+          <div><span class="k">Avaliações realizadas</span><span class="v">${rs.realizadas}</span></div>
+        </div>
+        ${rs.divergentes ? `<div class="alert warn" style="margin-top:8px">${icon('info', 16)}<span>${rs.divergentes} aluno(s) com cartão corrigido não estão como Presente. As respostas foram preservadas; confira a situação.</span></div>` : ''}
+        <div class="part-list">${alunos.map(linha).join('') || '<p class="xs muted">Nenhum aluno vinculado a esta turma.</p>'}</div>
+        <p class="xs muted" style="margin-top:6px">Pendente = ainda pode fazer a avaliação. Marcar Presente não preenche respostas.</p>
+        ${av.lancar_sided && (aEnviar.length || enviadas.length) ? `
+          <div class="row between wrap" style="gap:8px;margin-top:8px">
+            <span class="xs muted">Ausências no SIDED+: ${aEnviar.length} aguardando · ${enviadas.length} enviada(s)</span>
+            <button class="btn btn-outline btn-sm" type="button" data-enviar-ausencias="${esc(tid)}" ${aEnviar.length && triOk ? '' : 'disabled'}>
+              ${icon('cloud', 14)} Enviar ${aEnviar.length} ausência(s) ao SIDED+
+            </button>
+          </div>` : ''}
+      </div>`;
+  }
+
+  function repintarParticipacao(turmaId) {
+    const apl = store.aplicacaoDe(av, turmaId);
+    const caixa = root.querySelector(`[data-part-box="${CSS.escape(turmaId)}"]`);
+    if (!apl || !caixa) return;
+    const rolagem = caixa.querySelector('.part-list')?.scrollTop || 0;
+    const nova = el(blocoParticipacao(apl));
+    caixa.replaceWith(nova);
+    const lista = nova.querySelector('.part-list');
+    if (lista) lista.scrollTop = rolagem;
+  }
+
+  root.addEventListener('click', async (ev) => {
+    const b = ev.target.closest('[data-part]');
+    if (b) {
+      const { turma: turmaId, aluno: alunoId, part: situacao } = b.dataset;
+      const apl = store.aplicacaoDe(av, turmaId);
+      const linha = b.closest('[data-aluno-row]');
+      linha?.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+      let r = await store.definirParticipacao({ avaliacao: av, aplicacao: apl, alunoId, situacao });
+      if (r.precisaConfirmar) {
+        if (window.confirm(r.motivo)) r = await store.definirParticipacao({ avaliacao: av, aplicacao: apl, alunoId, situacao, confirmado: true });
+        else { repintarParticipacao(turmaId); return; }
+      }
+      if (!r.ok) toast(r.erro, 'err');
+      else if (r.pendente) toast(r.mensagem, 'ok');
+      else if (r.substituida) toast('Outro aparelho tinha uma alteração mais recente; ela foi mantida.', 'err');
+      repintarParticipacao(turmaId);
+      return;
+    }
+
+    const e = ev.target.closest('[data-enviar-ausencias]');
+    if (e) {
+      const turmaId = e.dataset.enviarAusencias;
+      const n = store.ausenciasParaEnviar(av.id, turmaId).length;
+      if (!window.confirm(`Enviar ${n} ausência(s) ao SIDED+?\n\nElas vão marcadas como AUSENTE e NÃO REALIZADO, sem nota. Nota já lançada no SIDED+ não é alterada.`)) return;
+      e.disabled = true;
+      const r = await store.enviarAusenciasAoSided(av.id, turmaId);
+      if (r.erro && !Array.isArray(r.falhas)) toast(r.erro, 'err');
+      else if (r.falhas.length) toast(`${r.enviados} enviada(s). ${r.falhas.length} com problema: ${r.falhas[0].erro}`, 'err');
+      else toast(r.aviso || `${r.enviados} ausência(s) enviada(s) ao SIDED+.`, r.aviso ? 'err' : 'ok');
+      repintarParticipacao(turmaId);
+    }
+  });
+
   function blocoTurma(apl) {
     const t = store.turma(apl.turma_id);
     const disc = store.disciplina(apl.disciplina_id);
@@ -57,6 +175,8 @@ export default function avaliacaoDetalhe(params) {
           <div><span class="k">Média da turma</span><span class="v">${media == null ? '—' : fmtNota(media)}</span></div>
           <div><span class="k">Abaixo da faixa amarela</span><span class="v">${abaixo}</span></div>
         </div>
+
+        ${blocoParticipacao(apl)}
 
         ${pendentes.length ? `
           <div class="row wrap" style="margin-top:12px;gap:8px">
@@ -211,6 +331,9 @@ export default function avaliacaoDetalhe(params) {
   }
 
   function pintar() {
+    // Repintar tudo não pode devolver a lista de alunos ao topo.
+    const rolagemListas = new Map([...root.querySelectorAll('[data-part-box]')]
+      .map((c) => [c.dataset.partBox, c.querySelector('.part-list')?.scrollTop || 0]));
     const prazo = store.prazoDe(av);
     // Etapa 4B: só mostra a coluna quando há habilidade vinculada.
     const comHabilidades = av.questoes.some((q) => q.habilidade_bncc);
@@ -322,6 +445,11 @@ export default function avaliacaoDetalhe(params) {
         <p class="xs muted" style="margin-top:10px">Questões anuladas são creditadas a todos os alunos.</p>
       </section>
     `;
+
+    rolagemListas.forEach((topo, tid) => {
+      const lista = root.querySelector(`[data-part-box="${CSS.escape(tid)}"] .part-list`);
+      if (lista) lista.scrollTop = topo;
+    });
 
     root.querySelector('[data-def-tri]')?.addEventListener('click', async (ev) => {
       const tri = root.querySelector('[data-def-tri-sel]')?.value;

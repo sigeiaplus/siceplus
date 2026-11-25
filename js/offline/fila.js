@@ -146,6 +146,25 @@ export async function enfileirarEdicao(usuarioId, dados) {
   return item;
 }
 
+/**
+ * Registra a participação (presente/ausente/pendente) de um aluno numa avaliação.
+ * `dados`: { chave_alvo, avaliacao_id, local }. Já havendo uma operação
+ * ainda não enviada para o mesmo aluno/avaliação, ela é atualizada no lugar (sem duplicar).
+ */
+export async function enfileirarParticipacao(usuarioId, dados) {
+  const item = await banco.filaEnfileirar(usuarioId, {
+    tipo: 'participacao',
+    chave_alvo: dados.chave_alvo,
+    avaliacao_id: dados.avaliacao_id,
+    dados: {},
+    local: dados.local,
+    scan_ok: false,
+    sincronizado_em: null,
+  });
+  if (item) avisarMudanca();
+  return item;
+}
+
 export function listar(usuarioId) { return banco.filaListar(usuarioId); }
 
 /** Contagem por status e total em aberto (tudo que ainda não chegou ao servidor). */
@@ -299,7 +318,7 @@ async function rodarFila(usuarioId, { aoSincronizar }) {
 
     if (bloqueadas.has(proximo.chave_alvo)) continue;
     // Resultado de uma avaliação que a nuvem recusou: espera (sem a avaliação na nuvem ele também seria recusado).
-    if (proximo.tipo === 'resultado' && avaliacoesBloqueadas.has(proximo.local?.avaliacao_id)) continue;
+    if ((proximo.tipo === 'resultado' || proximo.tipo === 'participacao') && avaliacoesBloqueadas.has(proximo.local?.avaliacao_id)) continue;
 
     const emEnvio = await banco.filaAtualizar(proximo.seq, (x) => ({
       ...x, status: STATUS.SINCRONIZANDO, tentativas: (x.tentativas || 0) + 1,
@@ -365,9 +384,16 @@ async function rodarFila(usuarioId, { aoSincronizar }) {
  *  - 'resultado': grava o resultado e, se houver, registra o scan uma única vez;
  *  - 'avaliacao': grava a avaliação (id do aparelho) e o código do caderno;
  *  - 'questoes' : grava questões e alternativas (só roda depois da avaliação: ordem da fila);
- *  - 'edicao'   : aplica a edição local sobre a avaliação existente, com detecção de conflito.
+ *  - 'edicao'   : aplica a edição local sobre a avaliação existente, com detecção de conflito;
+ *  - 'participacao': grava presente/ausente/pendente sem sobrescrever versão mais nova da nuvem.
  */
 async function enviarItem(item) {
+  if (item.tipo === 'participacao') {
+    // Devolve { aplicado, linha }: aplicado=false significa que a nuvem tinha versão mais nova.
+    // Toda mudança zera o "enviado ao SIDED+": reenviar a ausência depois é idempotente.
+    return nuvem.gravarParticipacaoSemSobrescrever(item.local, { zerarEnvio: true });
+  }
+
   if (item.tipo === 'edicao') {
     const d = item.dados;
     return nuvem.aplicarEdicaoAvaliacao({
