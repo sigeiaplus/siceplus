@@ -50,6 +50,66 @@ export function faixaDe(percentual) {
   return 'vermelho';
 }
 
+/* ---- Níveis de aprendizagem do aluno (percentual de acerto da prova, arredondado) ----
+   Defasagem: até 50% · Intermediário: 51% a 74% · Adequado: 75% ou mais. */
+export const CORTES_APRENDIZAGEM = { defasagem: 50, intermediario: 74 };
+
+export function nivelAprendizagem(percentual) {
+  if (percentual == null) return null;
+  const v = Math.round(Number(percentual));
+  if (v <= CORTES_APRENDIZAGEM.defasagem) return 'defasagem';
+  if (v <= CORTES_APRENDIZAGEM.intermediario) return 'intermediario';
+  return 'adequado';
+}
+
+/* ---- Faixas do acerto por habilidade: até 40 · 41–60 · 61–80 · acima de 80 ---- */
+export function faixaHabilidade(percentual) {
+  if (percentual == null) return null;
+  const v = Math.round(Number(percentual));
+  if (v <= 40) return 'f1';
+  if (v <= 60) return 'f2';
+  if (v <= 80) return 'f3';
+  return 'f4';
+}
+
+/**
+ * Participação e níveis por turma (para a tabela e os cartões do topo).
+ * @param turmas [{id, nome, previstos}]  — previstos vem do cadastro de alunos da turma.
+ */
+export function resumoPorTurma(dados, avaliacaoId, turmas) {
+  const linhas = (turmas || []).map((t) => {
+    const rel = calcular(dados, { avaliacaoId, turmaId: t.id });
+    const niveis = { defasagem: 0, intermediario: 0, adequado: 0 };
+    rel.alunos.forEach((a) => {
+      const n = nivelAprendizagem(a.percentualGeral);
+      if (n) niveis[n] += 1;
+    });
+    const classificados = niveis.defasagem + niveis.intermediario + niveis.adequado;
+    const habilidades = new Map(rel.habilidades.map((h) => [h.codigo, h.percentual]));
+    return {
+      id: t.id,
+      nome: t.nome,
+      previstos: t.previstos,
+      avaliados: rel.alunos.length,
+      participacao: t.previstos > 0 ? (rel.alunos.length / t.previstos) * 100 : null,
+      niveis,
+      classificados,
+      habilidades,
+    };
+  });
+
+  const total = linhas.reduce((s, l) => {
+    s.previstos += l.previstos;
+    s.avaliados += l.avaliados;
+    s.classificados += l.classificados;
+    Object.keys(s.niveis).forEach((k) => { s.niveis[k] += l.niveis[k]; });
+    return s;
+  }, { previstos: 0, avaliados: 0, classificados: 0, niveis: { defasagem: 0, intermediario: 0, adequado: 0 } });
+  total.participacao = total.previstos > 0 ? (total.avaliados / total.previstos) * 100 : null;
+
+  return { linhas, total };
+}
+
 /** Descrição/temas por código, juntando todas as turmas do planejamento. */
 function catalogoDe(habilidades) {
   const mapa = new Map();
@@ -120,6 +180,7 @@ export function calcular(dados, filtro = {}) {
   const alunos = new Map();
   const contados = new Set();
   const questoesContadas = new Set();
+  const geralContadas = new Set();
   let emRevisao = 0;
   let foraDoCalculo = 0;
 
@@ -133,12 +194,23 @@ export function calcular(dados, filtro = {}) {
     const respostas = r.respostas || {};
     let aluno = alunos.get(r.aluno_id);
     if (!aluno) {
-      aluno = { aluno_id: r.aluno_id, acertos: 0, erros: 0, habilidades: new Map() };
+      aluno = { aluno_id: r.aluno_id, acertos: 0, erros: 0, geral: { acertos: 0, erros: 0 }, habilidades: new Map() };
       alunos.set(r.aluno_id, aluno);
     }
 
     (av.questoes || []).forEach((q) => {
       if (q.anulada) return;
+      const marcada = respostas[q.numero];
+      const acertou = marcada != null && marcada !== '' && marcada === q.gabarito;
+
+      // Acerto da prova inteira (inclui questões sem habilidade). Base dos níveis de aprendizagem.
+      const chaveGeral = `${r.avaliacao_id}|${r.aluno_id}|${q.numero}`;
+      if (!geralContadas.has(chaveGeral)) {
+        geralContadas.add(chaveGeral);
+        if (acertou) aluno.geral.acertos += 1;
+        else aluno.geral.erros += 1;
+      }
+
       const codigos = codigosDaQuestao(q);
       if (!codigos.length) return;
 
@@ -148,8 +220,6 @@ export function calcular(dados, filtro = {}) {
       if (questoesContadas.has(chaveQuestao)) return;
       questoesContadas.add(chaveQuestao);
 
-      const marcada = respostas[q.numero];
-      const acertou = marcada != null && marcada !== '' && marcada === q.gabarito;
       if (acertou) aluno.acertos += 1;
       else aluno.erros += 1;
 
@@ -221,6 +291,7 @@ export function calcular(dados, filtro = {}) {
       erros: a.erros,
       total: a.acertos + a.erros,
       percentual: percentualDe(a.acertos, a.erros),
+      percentualGeral: percentualDe(a.geral.acertos, a.geral.erros),
       habilidades: avaliadas,
       dificuldades,
       maiorDificuldade: dificuldades[0]?.codigo || null,

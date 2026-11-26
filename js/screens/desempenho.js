@@ -1,33 +1,45 @@
 import * as store from '../store.js';
-import { calcular, codigosDaQuestao, faixaDe, FAIXAS } from '../desempenho.js';
 import {
-  el, esc, icon, badge, barraDesempenho, fmtNota, iniciais, reagirEnquantoVisivel,
+  calcular, codigosDaQuestao, faixaDe, faixaHabilidade, nivelAprendizagem, resumoPorTurma, FAIXAS,
+} from '../desempenho.js';
+import {
+  el, esc, icon, badge, barraDesempenho, fmtNota, fmtDataHora, iniciais, reagirEnquantoVisivel,
 } from '../ui.js';
 
 /**
- * Desempenho por habilidade.
+ * Painel de desempenho.
  *
- * Fluxo igual ao de Resultados: primeiro escolhe a avaliação e a turma, só então aparece o
- * relatório. O relatório usa apenas as habilidades vinculadas às questões DA PROVA escolhida.
+ * De cima para baixo: filtros → participação → nível de aprendizagem → acerto por habilidade
+ * (blocos coloridos) → visão detalhada (tabela por turma, matriz de habilidades, por aluno).
  *
  * Tudo é calculado localmente com o que já está no app (nuvem ou cópia do aparelho), então
  * funciona offline e nada aqui grava na nuvem.
  *
  * Desempenho de tela: o cálculo roda uma vez por escolha (avaliação/turma) ou quando a
  * sincronização muda os dados. Trocar de aba, filtrar, buscar e abrir aluno só redesenha a
- * parte afetada, sem recalcular nem refazer o cabeçalho.
+ * parte afetada.
  */
 
 // A escolha vale enquanto o app estiver aberto (sobrevive a sair e voltar da tela).
-// Recarregar a página é sessão nova e pergunta de novo; "Alterar" também.
 let escolhaSessao = null;   // { avaliacaoId, turmaId: 'todas' | id }
 
-const NIVEIS = [
-  { id: 'todas', rotulo: 'Todas' },
-  { id: 'reforco', rotulo: 'Reforço' },
-  { id: 'meio', rotulo: 'Em desenvolvimento' },
-  { id: 'dominio', rotulo: 'Domínio' },
-  { id: 'sem', rotulo: 'Sem resultados' },
+const NIVEIS_APR = [
+  { id: 'defasagem', rotulo: 'Defasagem' },
+  { id: 'intermediario', rotulo: 'Aprendizado intermediário' },
+  { id: 'adequado', rotulo: 'Aprendizado adequado' },
+];
+
+const FAIXAS_HAB = [
+  { id: 'f1', rotulo: 'Até 40%' },
+  { id: 'f2', rotulo: 'De 41 até 60%' },
+  { id: 'f3', rotulo: 'De 61 até 80%' },
+  { id: 'f4', rotulo: 'Acima de 80%' },
+];
+
+const ABAS = [
+  { id: 'participacao', rotulo: 'Participação e desempenho' },
+  { id: 'habilidades', rotulo: 'Acerto por habilidade' },
+  { id: 'alunos', rotulo: 'Por aluno' },
 ];
 
 const ORDENS = [
@@ -48,63 +60,108 @@ const corDaFaixa = (faixa) => (
 );
 
 const pctTexto = (p) => (p == null ? '—' : `${fmtNota(p)}%`);
-
-/** Códigos distintos de habilidade vinculados às questões (não anuladas) de uma avaliação. */
-function habilidadesDaProva(av) {
-  const codigos = new Set();
-  (av?.questoes || []).forEach((q) => {
-    if (q.anulada) return;
-    codigosDaQuestao(q).forEach((c) => codigos.add(c));
-  });
-  return codigos;
-}
+const pctInteiro = (n, total) => (total > 0 ? `${Math.round((n / total) * 100)}%` : '—');
+const porCodigo = (a, b) => a.codigo.localeCompare(b.codigo, 'pt-BR', { numeric: true });
 
 export default function desempenho() {
   const root = el('<div class="des-root"></div>');
 
+  const avs0 = store.avaliacoes();
+  const inicial = avs0.find((a) => a.id === escolhaSessao?.avaliacaoId) || avs0[0] || null;
+
   const st = {
-    avaliacaoId: escolhaSessao?.avaliacaoId || null,   // null = ainda não escolheu
-    turmaId: escolhaSessao?.turmaId || 'todas',
-    rascunho: { avaliacaoId: '', turmaId: 'todas' },
-    modo: 'habilidades',   // 'habilidades' | 'alunos'
-    nivel: 'todas',        // filtro da aba de habilidades
+    avaliacaoId: inicial?.id || null,
+    turmaId: inicial && inicial.id === escolhaSessao?.avaliacaoId ? (escolhaSessao.turmaId || 'todas') : 'todas',
+    aba: 'participacao',
+    faixa: 'todas',        // filtro dos blocos de habilidade
     busca: '',             // busca da aba de alunos
     ordem: 'menor',
     aberto: null,          // aluno expandido
   };
 
   let rel = null;          // relatório calculado (null = precisa recalcular)
+  let porTurma = null;     // participação e níveis por turma
 
   const nomeAluno = (id) => store.aluno(id)?.nome_completo || '—';
+
+  function turmasDaAvaliacao(av) {
+    return (av?.aplicacoes || [])
+      .map((a) => store.turma(a.turma_id)).filter(Boolean)
+      .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+  }
+
+  function turmasEmEscopo(av) {
+    const todas = turmasDaAvaliacao(av);
+    return st.turmaId === 'todas' ? todas : todas.filter((t) => t.id === st.turmaId);
+  }
 
   function relatorio() {
     if (!rel) rel = calcular(store.get(), { avaliacaoId: st.avaliacaoId, turmaId: st.turmaId });
     return rel;
   }
 
-  /* ---------------- Peças ---------------- */
-
-  function rotuloNivel(h) {
-    const n = nivelDe(h);
-    if (n === 'sem') return badge('Sem resultados', 'warn');
-    if (n === 'dominio') return badge('Domínio', 'ok');
-    if (n === 'reforco') return badge('Precisa de reforço', 'err');
-    return badge('Em desenvolvimento', 'warn');
+  function resumoTurmas() {
+    if (!porTurma) {
+      const av = store.avaliacao(st.avaliacaoId);
+      const turmas = turmasEmEscopo(av).map((t) => ({
+        id: t.id, nome: t.nome, previstos: store.alunosDaTurma(t.id).length,
+      }));
+      porTurma = resumoPorTurma(store.get(), st.avaliacaoId, turmas);
+    }
+    return porTurma;
   }
 
-  /** Cartão de uma habilidade (visão da turma ou de um aluno). */
+  /* ---------------- Dica (tooltip) dos blocos de habilidade ---------------- */
+
+  const dica = el('<div class="des-dica" role="tooltip" hidden></div>');
+
+  function mostrarDica(alvo) {
+    const r = relatorio();
+    const h = r.habilidades.find((x) => x.codigo === alvo.dataset.cod);
+    if (!h) return;
+    dica.innerHTML = `
+      <span class="des-dica-eyebrow">${esc(alvo.dataset.rotulo)} (${esc(h.codigo)})</span>
+      <strong>É o percentual de acerto nesta habilidade</strong>
+      <span class="des-dica-desc">${esc(h.descricao || 'Descrição não encontrada no planejamento.')}</span>
+      <span class="des-dica-meta">${h.acertos} acerto(s) · ${h.erros} erro(s) · ${h.alunos} aluno(s)</span>`;
+    dica.hidden = false;
+
+    const rc = alvo.getBoundingClientRect();
+    const dw = dica.offsetWidth;
+    const dh = dica.offsetHeight;
+    const margem = 8;
+    let left = rc.left + rc.width / 2 - dw / 2;
+    left = Math.max(margem, Math.min(left, window.innerWidth - dw - margem));
+    let top = rc.top - dh - margem;
+    if (top < margem) top = rc.bottom + margem;
+    dica.style.left = `${left}px`;
+    dica.style.top = `${top}px`;
+  }
+
+  function esconderDica() { dica.hidden = true; }
+
+  const aoClicarFora = (e) => {
+    if (!e.target.closest?.('.des-tile')) esconderDica();
+  };
+  document.addEventListener('click', aoClicarFora);
+
+  /* ---------------- Peças ---------------- */
+
+  /** Cartão de uma habilidade na visão de um aluno. */
   function cartaoHabilidade(h, extra = {}) {
-    const meta = [
-      extra.questoes != null ? `${extra.questoes} questão(ões)` : null,
-      extra.alunos != null ? `${extra.alunos} aluno(s)` : null,
-      h.temas.length ? h.temas.join(' · ') : null,
-    ].filter(Boolean).join(' · ');
+    const rotuloNivel = (() => {
+      const n = nivelDe(h);
+      if (n === 'sem') return badge('Sem resultados', 'warn');
+      if (n === 'dominio') return badge('Domínio', 'ok');
+      if (n === 'reforco') return badge('Precisa de reforço', 'err');
+      return badge('Em desenvolvimento', 'warn');
+    })();
 
     return `
       <article class="des-hab ${nivelDe(h)}">
         <div class="des-hab-top">
           <span class="des-cod">${esc(h.codigo)}</span>
-          ${rotuloNivel(h)}
+          ${rotuloNivel}
           ${extra.maiorDificuldade ? badge('Maior dificuldade', 'err') : ''}
           <strong class="des-hab-pct" style="color:${corDaFaixa(h.faixa)}">${pctTexto(h.percentual)}</strong>
         </div>
@@ -113,111 +170,222 @@ export default function desempenho() {
         <div class="des-hab-foot">
           <span><strong>${h.acertos}</strong> acerto(s)</span>
           <span><strong>${h.erros}</strong> erro(s)</span>
-          ${meta ? `<span class="des-meta">${esc(meta)}</span>` : ''}
         </div>
       </article>`;
   }
 
-  /* ---------------- Escolha inicial: avaliação e turma ---------------- */
+  const legendaFaixas = () => `
+    <div class="des-legenda">
+      ${FAIXAS_HAB.map((f) => `<span><i class="${f.id}"></i>${f.rotulo}</span>`).join('')}
+    </div>`;
 
-  function pintarEscolha() {
-    const avs = store.avaliacoes();
-    const av = avs.find((a) => a.id === st.rascunho.avaliacaoId) || null;
-    const turmasDaAv = (av?.aplicacoes || [])
-      .map((a) => store.turma(a.turma_id)).filter(Boolean)
-      .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
-    const qtdHab = av ? habilidadesDaProva(av).size : 0;
+  /* ---------------- Seções do topo ---------------- */
 
-    root.innerHTML = `
-      <div class="page-head">
-        <span class="eyebrow">Desempenho</span>
-        <h1>Habilidades: domínio e dificuldades</h1>
-        <p>Escolha a avaliação e a turma para ver o desempenho por habilidade. Notas individuais em <a href="#/resultados">Resultados</a>.</p>
-      </div>
-
-      ${avs.length ? `
-        <div class="card stack">
-          <div class="field" style="margin:0">
-            <label class="label" for="d-av">Avaliação</label>
-            <select id="d-av" class="select" data-d-av>
-              <option value="">Selecione a avaliação</option>
-              ${avs.map((a) => `<option value="${esc(a.id)}" ${a.id === st.rascunho.avaliacaoId ? 'selected' : ''}>${esc(a.titulo)}</option>`).join('')}
-            </select>
-            ${av ? `<p class="hint">${qtdHab
-              ? `${qtdHab} habilidade${qtdHab === 1 ? '' : 's'} vinculada${qtdHab === 1 ? '' : 's'} às questões desta prova.`
-              : 'Nenhuma habilidade vinculada às questões desta prova ainda.'}</p>` : ''}
-          </div>
-
-          <div class="field" style="margin:0">
-            <label class="label" for="d-turma">Turma</label>
-            <select id="d-turma" class="select" data-d-turma ${av ? '' : 'disabled'}>
-              <option value="todas">Todas as turmas</option>
-              ${turmasDaAv.map((t) => `<option value="${esc(t.id)}" ${t.id === st.rascunho.turmaId ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}
-            </select>
-          </div>
-
-          <button class="btn btn-primary" type="button" data-ver ${av ? '' : 'disabled'}>Ver desempenho</button>
-        </div>` : `
-        <div class="empty">
-          <div class="ei">${icon('target', 20)}</div>
-          <h3>Sem avaliações</h3>
-          <p>Crie uma avaliação, vincule as habilidades às questões e corrija os cartões para ver o desempenho.</p>
-          <a class="btn btn-primary" href="#/avaliacoes/nova">Nova avaliação</a>
-        </div>`}
-    `;
-
-    root.querySelector('[data-d-av]')?.addEventListener('change', (e) => {
-      st.rascunho.avaliacaoId = e.target.value;
-      st.rascunho.turmaId = 'todas';
-      pintarEscolha();
-    });
-    root.querySelector('[data-d-turma]')?.addEventListener('change', (e) => { st.rascunho.turmaId = e.target.value; });
-    root.querySelector('[data-ver]')?.addEventListener('click', () => {
-      if (!st.rascunho.avaliacaoId) return;
-      st.avaliacaoId = st.rascunho.avaliacaoId;
-      st.turmaId = st.rascunho.turmaId;
-      escolhaSessao = { avaliacaoId: st.avaliacaoId, turmaId: st.turmaId };
-      st.modo = 'habilidades';
-      st.nivel = 'todas';
-      st.busca = '';
-      st.aberto = null;
-      rel = null;
-      pintar();
-    });
+  function secaoFiltros(av, avs) {
+    const turmas = turmasDaAvaliacao(av);
+    const quando = store.dadosEmCache() && store.cacheAtualizadoEm()
+      ? fmtDataHora(store.cacheAtualizadoEm())
+      : fmtDataHora(new Date().toISOString());
+    return `
+      <p class="des-atualizado">Dados atualizados em ${esc(quando)}${store.dadosEmCache() ? ' (cópia do aparelho)' : ''}</p>
+      <div class="des-filtros">
+        <div class="field" style="margin:0">
+          <label class="label" for="d-av">Avaliação</label>
+          <select id="d-av" class="select" data-d-av>
+            ${avs.map((a) => `<option value="${esc(a.id)}" ${a.id === st.avaliacaoId ? 'selected' : ''}>${esc(a.titulo)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="margin:0">
+          <label class="label" for="d-turma">Turma</label>
+          <select id="d-turma" class="select" data-d-turma>
+            <option value="todas">Todas as turmas</option>
+            ${turmas.map((t) => `<option value="${esc(t.id)}" ${t.id === st.turmaId ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}
+          </select>
+        </div>
+      </div>`;
   }
 
-  function alterarEscolha() {
-    escolhaSessao = null;
-    st.rascunho = { avaliacaoId: st.avaliacaoId || '', turmaId: st.turmaId || 'todas' };
-    st.avaliacaoId = null;
-    st.turmaId = 'todas';
-    rel = null;
-    pintar();
+  function secaoParticipacao(av, t) {
+    const pct = t.participacao;
+    return `
+      <section class="card des-sec" aria-labelledby="d-t-part">
+        <div class="des-sec-head">
+          <h2 id="d-t-part">Participação</h2>
+          <button class="btn btn-outline btn-sm" type="button" data-ver-mais="participacao">Ver mais</button>
+        </div>
+        <div class="des-sec-sub">${esc(av.titulo)}</div>
+        <div class="des-grande-rotulo">Estudantes avaliados</div>
+        <div class="des-grande">${pct == null ? '—' : `${Math.round(pct)}%`}</div>
+        <div class="des-dist" role="img" aria-label="Participação: ${t.avaliados} de ${t.previstos} estudantes">
+          ${t.avaliados ? `<span class="apr" style="flex:${t.avaliados}"></span>` : ''}
+          ${t.previstos - t.avaliados > 0 ? `<span class="vazio" style="flex:${t.previstos - t.avaliados}"></span>` : ''}
+        </div>
+        <div class="des-linhas">
+          <div class="des-linha"><span><i class="apr"></i><strong>Avaliados</strong><small>${t.avaliados} estudante(s)</small></span><b>${pctInteiro(t.avaliados, t.previstos)}</b></div>
+          <div class="des-linha"><span><i class="vazio"></i><strong>Previstos</strong><small>${t.previstos} estudante(s)</small></span><b>${t.previstos}</b></div>
+        </div>
+      </section>`;
   }
 
-  /* ---------------- Aba: por habilidade ---------------- */
+  function secaoAprendizagem(av, t) {
+    const base = t.classificados;
+    const adequado = t.niveis.adequado;
+    return `
+      <section class="card des-sec" aria-labelledby="d-t-apr">
+        <div class="des-sec-head"><h2 id="d-t-apr">Nível de aprendizagem</h2></div>
+        <div class="des-sec-sub">${esc(av.titulo)}</div>
+        <div class="des-grande-rotulo">Estudantes com <strong>aprendizagem adequada</strong></div>
+        <div class="des-grande">${pctInteiro(adequado, base)}</div>
+        <div class="des-grande-rotulo">Distribuição dos estudantes por níveis de aprendizagem</div>
+        <div class="des-dist" role="img" aria-label="Distribuição dos estudantes por nível de aprendizagem">
+          ${NIVEIS_APR.map((n) => (t.niveis[n.id] ? `<span class="${n.id}" style="flex:${t.niveis[n.id]}"></span>` : '')).join('')}
+        </div>
+        <div class="des-linhas">
+          ${NIVEIS_APR.map((n) => `
+            <div class="des-linha">
+              <span><i class="${n.id}"></i><strong>${n.rotulo}</strong><small>${t.niveis[n.id]} estudante(s)</small></span>
+              <b>${pctInteiro(t.niveis[n.id], base)}</b>
+            </div>`).join('')}
+        </div>
+        <p class="xs muted">Defasagem: até 50% de acerto · Intermediário: 51% a 74% · Adequado: 75% ou mais.</p>
+      </section>`;
+  }
 
-  function corpoHabilidades(r) {
-    const contagem = { todas: r.habilidades.length, reforco: 0, meio: 0, dominio: 0, sem: 0 };
-    r.habilidades.forEach((h) => { contagem[nivelDe(h)] += 1; });
-    if (st.nivel !== 'todas' && !contagem[st.nivel]) st.nivel = 'todas';
+  /* ---------------- Acerto por habilidade (blocos) ---------------- */
 
-    const lista = st.nivel === 'todas' ? r.habilidades : r.habilidades.filter((h) => nivelDe(h) === st.nivel);
+  function corpoBlocos() {
+    const r = relatorio();
+    const ordenadas = [...r.habilidades].sort(porCodigo);
+    const itens = ordenadas
+      .map((h, i) => ({ h, rotulo: `H ${String(i + 1).padStart(2, '0')}`, faixa: faixaHabilidade(h.percentual) }))
+      .filter((x) => st.faixa === 'todas' || x.faixa === st.faixa);
+
+    if (!itens.length) return '<p class="xs muted">Nenhuma habilidade nesta faixa.</p>';
 
     return `
-      <div class="chips" role="tablist" aria-label="Filtrar habilidades">
-        ${NIVEIS.filter((n) => n.id === 'todas' || contagem[n.id]).map((n) => `
-          <button class="chip ${st.nivel === n.id ? 'on' : ''}" type="button" data-nivel="${n.id}">
-            ${n.rotulo} <span class="des-chip-n">${contagem[n.id]}</span>
+      <div class="des-tiles">
+        ${itens.map(({ h, rotulo, faixa }) => `
+          <button class="des-tile ${faixa || 'sem'}" type="button" data-cod="${esc(h.codigo)}" data-rotulo="${esc(rotulo)}"
+                  aria-label="${esc(`${rotulo}, ${h.codigo}: ${pctTexto(h.percentual)} de acerto`)}">
+            <span class="des-tile-h">${esc(rotulo)}</span>
+            <span class="des-tile-c">(${esc(h.codigo)})</span>
+            <strong>${h.percentual == null ? '—' : `${Math.round(h.percentual)}%`}</strong>
           </button>`).join('')}
-      </div>
-      <div class="des-grid">
-        ${lista.map((h) => cartaoHabilidade(h, { questoes: h.questoes, alunos: h.alunos })).join('')}
-      </div>
-      <p class="xs muted">Dificuldades primeiro. Questão com mais de uma habilidade conta para cada uma delas.</p>`;
+      </div>`;
   }
 
-  /* ---------------- Aba: por aluno ---------------- */
+  function pintarBlocos() {
+    const alvo = root.querySelector('[data-blocos]');
+    if (!alvo) return;
+    esconderDica();
+    alvo.innerHTML = corpoBlocos();
+    alvo.querySelectorAll('.des-tile').forEach((b) => {
+      b.addEventListener('mouseenter', () => mostrarDica(b));
+      b.addEventListener('mouseleave', esconderDica);
+      b.addEventListener('focus', () => mostrarDica(b));
+      b.addEventListener('blur', esconderDica);
+      b.addEventListener('click', () => mostrarDica(b));
+    });
+  }
+
+  function secaoHabilidades(r) {
+    return `
+      <section class="card des-sec" aria-labelledby="d-t-hab">
+        <div class="des-sec-head">
+          <h2 id="d-t-hab">Percentual de acerto por habilidade</h2>
+          <button class="btn btn-outline btn-sm" type="button" data-ver-mais="habilidades">Ver mais</button>
+        </div>
+        ${r.habilidades.length ? `
+          <div class="field des-faixa-campo" style="margin:0">
+            <label class="label" for="d-faixa">Acerto por habilidade</label>
+            <select id="d-faixa" class="select" data-faixa>
+              <option value="todas">Todos</option>
+              ${FAIXAS_HAB.map((f) => `<option value="${f.id}" ${st.faixa === f.id ? 'selected' : ''}>${f.rotulo}</option>`).join('')}
+            </select>
+          </div>
+          <div data-blocos></div>
+          ${legendaFaixas()}` : `
+          <div class="empty">
+            <div class="ei">${icon('target', 20)}</div>
+            <h3>Nenhuma habilidade vinculada a esta prova</h3>
+            <p>As questões desta avaliação não têm habilidade do planejamento. Edite a avaliação e vincule as habilidades na etapa <strong>Questões</strong>.</p>
+            <a class="btn btn-primary" href="#/avaliacoes/editar/${esc(st.avaliacaoId)}">Editar avaliação</a>
+          </div>`}
+      </section>`;
+  }
+
+  /* ---------------- Visão detalhada ---------------- */
+
+  function abaParticipacao() {
+    const { linhas, total } = resumoTurmas();
+    if (!linhas.length) return '<p class="xs muted">Nenhuma turma vinculada a esta avaliação.</p>';
+
+    const celulaNivel = (l, id) => `<td><span class="des-ponto"><i class="${id}"></i>${pctInteiro(l.niveis[id], l.classificados)}</span></td>`;
+    const linha = (l, destaque = false) => `
+      <tr class="${destaque ? 'des-total' : ''}">
+        <th scope="row">${esc(l.nome)}</th>
+        <td>${l.previstos}</td>
+        <td>${l.avaliados}</td>
+        <td>${l.participacao == null ? '—' : `${Math.round(l.participacao)}%`}</td>
+        ${NIVEIS_APR.map((n) => celulaNivel(l, n.id)).join('')}
+      </tr>`;
+
+    return `
+      <div class="des-tabela-wrap">
+        <table class="des-tabela">
+          <thead>
+            <tr>
+              <th scope="col">Turma</th>
+              <th scope="col">Previstos</th>
+              <th scope="col">Avaliados</th>
+              <th scope="col">% Participação</th>
+              ${NIVEIS_APR.map((n) => `<th scope="col">${n.rotulo}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${linhas.map((l) => linha(l)).join('')}
+            ${linhas.length > 1 ? linha({ ...total, nome: 'Total' }, true) : ''}
+          </tbody>
+        </table>
+      </div>
+      <p class="xs muted">Os percentuais de nível consideram só os estudantes avaliados.</p>`;
+  }
+
+  function abaHabilidades() {
+    const r = relatorio();
+    const { linhas } = resumoTurmas();
+    if (!r.habilidades.length) return '<p class="xs muted">Nenhuma habilidade com resultado nesta prova.</p>';
+
+    const ordenadas = [...r.habilidades].sort(porCodigo);
+    const celula = (p) => {
+      const f = faixaHabilidade(p);
+      return `<td><span class="des-celula ${f || 'sem'}">${p == null ? '—' : `${Math.round(p)}%`}</span></td>`;
+    };
+
+    return `
+      <div class="des-tabela-wrap">
+        <table class="des-tabela des-matriz">
+          <thead>
+            <tr>
+              <th scope="col">Habilidade</th>
+              ${linhas.map((l) => `<th scope="col">${esc(l.nome)}</th>`).join('')}
+              ${linhas.length > 1 ? '<th scope="col">Geral</th>' : ''}
+            </tr>
+          </thead>
+          <tbody>
+            ${ordenadas.map((h, i) => `
+              <tr>
+                <th scope="row" title="${esc(h.descricao || '')}">
+                  <span class="des-matriz-h">H ${String(i + 1).padStart(2, '0')}</span> <span class="muted">(${esc(h.codigo)})</span>
+                </th>
+                ${linhas.map((l) => celula(l.habilidades.get(h.codigo) ?? null)).join('')}
+                ${linhas.length > 1 ? celula(h.percentual) : ''}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${legendaFaixas()}`;
+  }
 
   function alunosVisiveis(r) {
     const termo = st.busca.trim().toLowerCase();
@@ -275,7 +443,7 @@ export default function desempenho() {
       </article>`;
   }
 
-  function corpoAlunos(r) {
+  function abaAlunos(r) {
     if (!r.alunos.length) {
       return `
         <div class="empty">
@@ -322,22 +490,19 @@ export default function desempenho() {
     });
   }
 
-  /* ---------------- Corpo (troca de aba/filtros sem refazer o cabeçalho) ---------------- */
-
   function pintarCorpo() {
     const corpo = root.querySelector('[data-corpo]');
     if (!corpo) return;
-    const r = relatorio();
+    esconderDica();
 
-    root.querySelectorAll('[data-modo]').forEach((b) => {
-      const ativo = b.dataset.modo === st.modo;
+    root.querySelectorAll('[data-aba]').forEach((b) => {
+      const ativo = b.dataset.aba === st.aba;
       b.classList.toggle('on', ativo);
       b.setAttribute('aria-selected', String(ativo));
     });
 
-    if (st.modo === 'alunos') {
-      corpo.innerHTML = corpoAlunos(r);
-
+    if (st.aba === 'alunos') {
+      corpo.innerHTML = abaAlunos(relatorio());
       const busca = corpo.querySelector('[data-busca]');
       busca?.addEventListener('input', () => { st.busca = busca.value; pintarListaAlunos(); });
       corpo.querySelector('[data-ordem]')?.addEventListener('change', (e) => {
@@ -348,91 +513,68 @@ export default function desempenho() {
       return;
     }
 
-    corpo.innerHTML = corpoHabilidades(r);
-    corpo.querySelectorAll('[data-nivel]').forEach((b) => {
-      b.addEventListener('click', () => { st.nivel = b.dataset.nivel; pintarCorpo(); });
-    });
+    corpo.innerHTML = st.aba === 'habilidades' ? abaHabilidades() : abaParticipacao();
+  }
+
+  function irParaDetalhe(aba) {
+    st.aba = aba;
+    pintarCorpo();
+    root.querySelector('[data-detalhe]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   /* ---------------- Render ---------------- */
 
   function pintar() {
-    // Avaliação escolhida que deixou de existir (excluída): pergunta de novo.
-    if (st.avaliacaoId && !store.avaliacao(st.avaliacaoId)) {
-      escolhaSessao = null;
-      st.avaliacaoId = null;
-      rel = null;
+    esconderDica();
+    const avs = store.avaliacoes();
+
+    if (!avs.length) {
+      root.innerHTML = `
+        <div class="page-head">
+          <span class="eyebrow">Desempenho</span>
+          <h1>Desempenho</h1>
+        </div>
+        <div class="empty">
+          <div class="ei">${icon('target', 20)}</div>
+          <h3>Sem avaliações</h3>
+          <p>Crie uma avaliação, vincule as habilidades às questões e corrija os cartões para ver o desempenho.</p>
+          <a class="btn btn-primary" href="#/avaliacoes/nova">Nova avaliação</a>
+        </div>`;
+      root.append(dica);
+      return;
     }
-    if (!st.avaliacaoId) { pintarEscolha(); return; }
+
+    // Avaliação escolhida que deixou de existir (excluída): volta para a primeira.
+    if (!st.avaliacaoId || !store.avaliacao(st.avaliacaoId)) {
+      st.avaliacaoId = avs[0].id;
+      st.turmaId = 'todas';
+      rel = null; porTurma = null;
+    }
+    if (st.turmaId !== 'todas' && !turmasDaAvaliacao(store.avaliacao(st.avaliacaoId)).some((t) => t.id === st.turmaId)) {
+      st.turmaId = 'todas';
+      rel = null; porTurma = null;
+    }
+    escolhaSessao = { avaliacaoId: st.avaliacaoId, turmaId: st.turmaId };
 
     const av = store.avaliacao(st.avaliacaoId);
-    const turmaSel = st.turmaId !== 'todas' ? store.turma(st.turmaId) : null;
     const r = relatorio();
+    const { total } = resumoTurmas();
     const s = r.resumo;
-    const reforco = r.habilidades.filter((h) => nivelDe(h) === 'reforco').length;
-    const faixaGeral = faixaDe(s.percentual);
 
-    const cabecalho = `
+    root.innerHTML = `
       <div class="page-head">
         <span class="eyebrow">Desempenho</span>
-        <h1>Habilidades: domínio e dificuldades</h1>
+        <h1>Painel de desempenho</h1>
+        <p>Notas individuais em <a href="#/resultados">Resultados</a>.</p>
       </div>
 
-      <div class="card des-contexto">
-        <div class="grow" style="min-width:0">
-          <strong>${esc(av.titulo)}</strong>
-          <span class="xs muted" style="display:block">
-            ${esc([turmaSel ? turmaSel.nome : 'Todas as turmas', av.trimestre ? `${av.trimestre}º trimestre` : null].filter(Boolean).join(' · '))}
-          </span>
-        </div>
-        <button class="btn btn-outline btn-sm" type="button" data-alterar>Alterar</button>
-      </div>
+      ${secaoFiltros(av, avs)}
 
       ${store.erroDeHabilidades() ? `
         <div class="alert warn">
           ${icon('alert', 16)}
           <span>As habilidades do planejamento não puderam ser atualizadas agora. As descrições podem estar incompletas; os vínculos das questões foram mantidos.</span>
-        </div>` : ''}`;
-
-    if (!r.habilidades.length) {
-      root.innerHTML = `
-        ${cabecalho}
-        <div class="empty">
-          <div class="ei">${icon('target', 20)}</div>
-          <h3>Nenhuma habilidade vinculada a esta prova</h3>
-          <p>As questões desta avaliação não têm habilidade do planejamento. Edite a avaliação e vincule as habilidades na etapa <strong>Questões</strong>.</p>
-          <a class="btn btn-primary" href="#/avaliacoes/editar/${esc(av.id)}">Editar avaliação</a>
-        </div>`;
-      root.querySelector('[data-alterar]').addEventListener('click', alterarEscolha);
-      return;
-    }
-
-    const dist = [
-      { n: reforco, classe: 'err', rotulo: 'reforço' },
-      { n: r.habilidades.filter((h) => nivelDe(h) === 'meio').length, classe: 'warn', rotulo: 'em desenvolvimento' },
-      { n: r.habilidades.filter((h) => nivelDe(h) === 'dominio').length, classe: 'ok', rotulo: 'domínio' },
-      { n: r.habilidades.filter((h) => nivelDe(h) === 'sem').length, classe: 'none', rotulo: 'sem resultados' },
-    ].filter((d) => d.n > 0);
-
-    root.innerHTML = `
-      ${cabecalho}
-
-      <div class="des-kpis">
-        <div class="kpi"><div class="kv" style="color:${corDaFaixa(faixaGeral)}">${pctTexto(s.percentual)}</div><div class="kl">Aproveitamento geral</div></div>
-        <div class="kpi"><div class="kv">${s.alunosAvaliados}</div><div class="kl">Alunos avaliados</div></div>
-        <div class="kpi"><div class="kv">${s.habilidadesAvaliadas}</div><div class="kl">Habilidades da prova</div></div>
-        <div class="kpi"><div class="kv" style="color:${reforco ? 'var(--err)' : 'var(--ink)'}">${reforco}</div><div class="kl">Precisam de reforço</div></div>
-      </div>
-
-      <div class="card stack" style="gap:8px">
-        <div class="des-dist" role="img" aria-label="Distribuição das habilidades por nível de desempenho">
-          ${dist.map((d) => `<span class="${d.classe}" style="flex:${d.n}"></span>`).join('')}
-        </div>
-        <div class="des-legenda">
-          ${dist.map((d) => `<span><i class="${d.classe}"></i><strong>${d.n}</strong> ${d.rotulo}</span>`).join('')}
-        </div>
-        <span class="xs muted">${s.acertos} acerto(s) · ${s.erros} erro(s) em ${s.questoesComHabilidade} questão(ões) com habilidade</span>
-      </div>
+        </div>` : ''}
 
       ${s.emRevisao || s.foraDoCalculo ? `
         <div class="alert warn">
@@ -445,33 +587,65 @@ export default function desempenho() {
           </span>
         </div>` : ''}
 
-      <div class="des-abas" role="tablist" aria-label="Tipo de relatório">
-        <button class="des-aba" type="button" role="tab" data-modo="habilidades">Por habilidade</button>
-        <button class="des-aba" type="button" role="tab" data-modo="alunos">Por aluno <span class="des-chip-n">${s.alunosAvaliados}</span></button>
+      <div class="des-topo">
+        ${secaoParticipacao(av, total)}
+        ${secaoAprendizagem(av, total)}
       </div>
 
-      <div class="des-corpo" data-corpo></div>
+      ${secaoHabilidades(r)}
+
+      <section class="card des-sec" data-detalhe aria-labelledby="d-t-det">
+        <div class="des-sec-head"><h2 id="d-t-det">Visão detalhada dos resultados</h2></div>
+        <div class="des-abas" role="tablist" aria-label="Tipo de relatório">
+          ${ABAS.map((a) => `<button class="des-aba" type="button" role="tab" data-aba="${a.id}">${a.rotulo}${a.id === 'alunos' ? ` <span class="des-chip-n">${s.alunosAvaliados}</span>` : ''}</button>`).join('')}
+        </div>
+        <div class="des-corpo" data-corpo></div>
+      </section>
 
       <p class="xs muted">
         Questões anuladas não entram no cálculo e respostas em branco contam como erro, como na correção da nota.
         Só entram resultados com revisão confirmada.
       </p>
     `;
+    root.append(dica);
 
-    root.querySelector('[data-alterar]').addEventListener('click', alterarEscolha);
-    root.querySelectorAll('[data-modo]').forEach((b) => {
+    root.querySelector('[data-d-av]').addEventListener('change', (e) => {
+      st.avaliacaoId = e.target.value;
+      st.turmaId = 'todas';
+      st.faixa = 'todas';
+      st.busca = '';
+      st.aberto = null;
+      rel = null; porTurma = null;
+      pintar();
+    });
+    root.querySelector('[data-d-turma]').addEventListener('change', (e) => {
+      st.turmaId = e.target.value;
+      st.aberto = null;
+      rel = null; porTurma = null;
+      pintar();
+    });
+    root.querySelector('[data-faixa]')?.addEventListener('change', (e) => {
+      st.faixa = e.target.value;
+      pintarBlocos();
+    });
+    root.querySelectorAll('[data-ver-mais]').forEach((b) => {
+      b.addEventListener('click', () => irParaDetalhe(b.dataset.verMais));
+    });
+    root.querySelectorAll('[data-aba]').forEach((b) => {
       b.addEventListener('click', () => {
-        if (st.modo === b.dataset.modo) return;
-        st.modo = b.dataset.modo;
+        if (st.aba === b.dataset.aba) return;
+        st.aba = b.dataset.aba;
         pintarCorpo();
       });
     });
+
+    pintarBlocos();
     pintarCorpo();
   }
 
   // Dados mudaram em segundo plano (sincronização): recalcula uma vez e redesenha.
-  reagirEnquantoVisivel(root, store.aoMudarSincronizacao, () => { rel = null; pintar(); });
+  reagirEnquantoVisivel(root, store.aoMudarSincronizacao, () => { rel = null; porTurma = null; pintar(); });
 
   pintar();
-  return { node: root, destroy: () => {} };
+  return { node: root, destroy: () => { document.removeEventListener('click', aoClicarFora); } };
 }

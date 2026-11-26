@@ -719,3 +719,96 @@ body.cam-open { overflow: hidden; overscroll-behavior: none; }
 .cham-sw:focus-visible { outline: 2px solid var(--y-600); outline-offset: 2px; }
 .cham-turma { width: 100%; text-align: left; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
 .cham-voltar { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+
+/* ---------------- Painel de desempenho (v2) ---------------- */
+.des-root {
+  --nv-defasagem: #F5841F; --nv-intermediario: #FFCD2E; --nv-adequado: #8085F0;
+  --hab-f1: #F28C84; --hab-f2: #F5BBA7; --hab-f3: #A9E8F0; --hab-f4: #2CC9C4;
+}
+.des-atualizado { margin: 0; font-size: 12.5px; font-weight: 650; text-align: center; color: var(--ink-2); }
+.des-filtros { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+@media (min-width: 720px) { .des-filtros { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.des-topo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+@media (min-width: 900px) { .des-topo { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.des-sec { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.des-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.des-sec-head h2 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
+.des-sec-sub { font-weight: 700; font-size: 14px; }
+.des-grande-rotulo { font-size: 13.5px; color: var(--ink-2); }
+.des-grande-rotulo strong { color: var(--ink); }
+.des-grande { font-size: 40px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+
+/* Barra segmentada (participação e níveis) */
+.des-dist { height: 18px; border-radius: 4px; gap: 1px; }
+.des-dist span { min-width: 4px; }
+.des-dist .apr, .des-linha i.apr { background: var(--nv-adequado); }
+.des-dist .vazio, .des-linha i.vazio { background: var(--line-strong); }
+.des-dist .defasagem, .des-linha i.defasagem, .des-ponto i.defasagem { background: var(--nv-defasagem); }
+.des-dist .intermediario, .des-linha i.intermediario, .des-ponto i.intermediario { background: var(--nv-intermediario); }
+.des-dist .adequado, .des-linha i.adequado, .des-ponto i.adequado { background: var(--nv-adequado); }
+
+.des-linhas { display: flex; flex-direction: column; }
+.des-linha { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+.des-linha:first-child { border-top: 0; }
+.des-linha > span { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; }
+.des-linha i { grid-row: span 2; width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.des-linha small { grid-column: 2; font-size: 12px; color: var(--ink-3); }
+.des-linha b { font-weight: 600; color: var(--ink-2); }
+
+/* Blocos de habilidade */
+.des-faixa-campo { max-width: 260px; margin: 0 auto !important; width: 100%; }
+.des-tiles { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 14px 4px 6px; }
+.des-tile {
+  appearance: none; border: 0; cursor: pointer; font: inherit; color: var(--ink);
+  width: 92px; padding: 8px 6px 9px; border-radius: 6px;
+  display: flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.2;
+  background: var(--line); box-shadow: var(--shadow-1);
+}
+.des-tile-h { font-size: 11px; font-weight: 600; }
+.des-tile-c { font-size: 10.5px; max-width: 100%; overflow-wrap: anywhere; }
+.des-tile strong { font-size: 20px; letter-spacing: -.01em; }
+.des-tile.f1 { background: var(--hab-f1); }
+.des-tile.f2 { background: var(--hab-f2); }
+.des-tile.f3 { background: var(--hab-f3); }
+.des-tile.f4 { background: var(--hab-f4); }
+.des-tile:hover, .des-tile:focus-visible { box-shadow: 0 0 0 2px var(--ink-2); outline: none; }
+
+.des-sec > .des-legenda { justify-content: center; font-size: 12px; }
+.des-legenda i.f1 { background: var(--hab-f1); }
+.des-legenda i.f2 { background: var(--hab-f2); }
+.des-legenda i.f3 { background: var(--hab-f3); }
+.des-legenda i.f4 { background: var(--hab-f4); }
+.des-corpo > .des-legenda { justify-content: center; }
+
+/* Dica */
+.des-dica {
+  position: fixed; z-index: 50; width: min(280px, calc(100vw - 16px));
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 14px; border-radius: var(--r); background: var(--surface);
+  box-shadow: var(--shadow-2); border: 1px solid var(--line); pointer-events: none; font-size: 13px;
+}
+.des-dica[hidden] { display: none; }
+.des-dica-eyebrow { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3); font-weight: 700; }
+.des-dica strong { font-size: 13px; text-transform: uppercase; letter-spacing: .01em; }
+.des-dica-desc { color: var(--ink-2); overflow-wrap: anywhere; }
+.des-dica-meta { font-size: 11.5px; color: var(--ink-3); }
+
+/* Visão detalhada */
+.des-tabela-wrap { overflow-x: auto; border-top: 1px solid var(--line); }
+.des-tabela { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 620px; }
+.des-tabela th, .des-tabela td { padding: 14px 12px; text-align: center; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.des-tabela thead th { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.des-tabela th:first-child, .des-tabela td:first-child { text-align: left; }
+.des-tabela tbody th { font-weight: 500; text-transform: uppercase; font-size: 12.5px; letter-spacing: .02em; }
+.des-tabela tbody th[title] { cursor: help; }
+.des-total th, .des-total td { font-weight: 700; background: var(--bg); }
+.des-ponto { display: inline-flex; align-items: center; gap: 6px; }
+.des-ponto i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.des-matriz-h { font-weight: 700; }
+.des-celula { display: inline-block; min-width: 54px; padding: 6px 8px; border-radius: 6px; font-weight: 700; background: var(--line); }
+.des-celula.f1 { background: var(--hab-f1); }
+.des-celula.f2 { background: var(--hab-f2); }
+.des-celula.f3 { background: var(--hab-f3); }
+.des-celula.f4 { background: var(--hab-f4); }
