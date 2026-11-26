@@ -93,6 +93,9 @@ export function layoutCartao(questoes, numAlternativas, letras, grade = null) {
   const yTopo = REGIAO.y0;
   const larguraCol = LARGURA_COLUNA;
   const passoColuna = larguraCol + FOLGA_COLUNAS;
+  // Centraliza o bloco de colunas na folha quando há menos de 5 (a mesma conta vale para
+  // o desenho e para o leitor). Com 5 colunas o deslocamento é zero.
+  const deslocX = ((MAX_COLUNAS - cols) * passoColuna) / 2;
   const passo = (larguraCol - LARGURA_NUMERO - RECUO_BOLHAS * 2) / numAlternativas;
   const diametro = Math.min(DIAMETRO_MAX, passo * 0.8, alturaLinha * 0.66);
 
@@ -103,7 +106,7 @@ export function layoutCartao(questoes, numAlternativas, letras, grade = null) {
     const col = Math.floor(i / rows);
     const lin = i % rows;
     const yc = yTopo + alturaLinha * (lin + 0.5);
-    const xCol = REGIAO.x0 + col * passoColuna;
+    const xCol = REGIAO.x0 + deslocX + col * passoColuna;
 
     numeros.push({
       numero: q.numero,
@@ -128,7 +131,7 @@ export function layoutCartao(questoes, numAlternativas, letras, grade = null) {
   // Faixa de cada coluna: cabeçalho impresso (A B C D) e mensagens de erro.
   const faixas = Array.from({ length: cols }, (_, c) => {
     const daColuna = numeros.filter((q) => q.col === c);
-    const x = REGIAO.x0 + c * passoColuna;
+    const x = REGIAO.x0 + deslocX + c * passoColuna;
     return {
       col: c,
       x,
