@@ -720,6 +720,8 @@ export async function lerQR(cv, imagem, fallbackCanvas = null, opcoes = {}) {
     const nativo = await lerQRNativo(fallbackCanvas);
     if (nativo) return nativo;
   }
+  // OpenCV ainda carregando: só o detector nativo (se o navegador tiver) pode ler agora.
+  if (!cv) return rapido ? null : await lerQRNativo(fallbackCanvas);
   const { novo, guardar, limpar } = coletor(cv);
   try {
     if (cv.QRCodeDetector) {

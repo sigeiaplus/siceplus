@@ -166,42 +166,68 @@ async function subirResolucao(track) {
 
 const parar = (stream) => { if (stream) stream.getTracks().forEach((t) => t.stop()); };
 
-/**
- * Abre a câmera traseira principal na maior resolução.
- * Nunca recorre a `video: true` nem a outra lente: se algo falhar, lança erro.
- * @param {MediaDevices} md  navigator.mediaDevices
- * @returns {Promise<{stream: MediaStream, info: object}>}
- */
-export async function abrirCameraPrincipal(md) {
-  if (!md || !md.getUserMedia || !md.enumerateDevices) {
-    throw new CameraErro('sem-api', 'Este navegador não permite escolher a câmera. Use "Enviar foto".');
-  }
+/* ---------------- Cache da escolha (abertura rápida) ----------------
+ * Abrir a câmera custava 3 a 7 s: um getUserMedia só para liberar os nomes das lentes, a escolha,
+ * um segundo getUserMedia em 4096x3072 e depois mais trocas de resolução. Agora a lente escolhida
+ * (e a resolução máxima dela) fica guardada neste aparelho e a abertura é UM getUserMedia já no
+ * tamanho da pré-visualização. Se a lente guardada falhar, o cache é apagado e o caminho completo
+ * (com todas as conferências de "só a principal 1x") roda de novo. */
 
-  // 1) Permissão (sem ela os nomes das câmeras vêm vazios). Este quadro é descartado.
+const CHAVE_CACHE = 'sicep-camera-v2';
+
+function lerCache() {
+  try {
+    const c = JSON.parse(globalThis.localStorage?.getItem(CHAVE_CACHE) || 'null');
+    if (c && typeof c.deviceId === 'string' && c.deviceId) return c;
+  } catch (_) { /* sem cache */ }
+  return null;
+}
+
+function gravarCache(c) {
+  try { globalThis.localStorage?.setItem(CHAVE_CACHE, JSON.stringify(c)); } catch (_) { /* sem cache */ }
+}
+
+/** Apaga a lente guardada (a próxima abertura refaz a escolha completa). */
+export function limparCacheCamera() {
+  try { globalThis.localStorage?.removeItem(CHAVE_CACHE); } catch (_) { /* ok */ }
+}
+
+/** Lista as câmeras COM nome. Só abre uma câmera "de sonda" quando o navegador não revela os nomes. */
+async function dispositivosComNome(md) {
+  const listar = async () => (await md.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+  let lista = [];
+  try { lista = await listar(); } catch (_) { /* tenta com sonda */ }
+  if (lista.some((d) => String(d.label || '').trim())) return lista;
+
+  // Sem nomes (permissão ainda não concedida): a sonda libera os nomes. Este quadro é descartado.
   let sonda = null;
-  let dispositivos;
   try {
     sonda = await md.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' } } });
-    dispositivos = (await md.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    return await listar();
   } finally {
     parar(sonda);
   }
+}
 
-  // 2) Escolha da principal (ou erro explicando a limitação).
-  const escolha = escolherPrincipal(dispositivos);
-
-  // 3) Abre exatamente essa câmera, pedindo a maior resolução.
+/**
+ * Abre a câmera escolhida UMA vez, já no tamanho da pré-visualização, e confere a lente aberta.
+ * @param {{deviceId: string, label: string, confianca: string, motivo: string}} escolha
+ * @param {{largura: number, altura: number}|null} maximaConhecida  resolução máxima guardada (ou null)
+ */
+async function abrirEscolha(md, escolha, maximaConhecida) {
+  // Sem máxima conhecida, assume sensor 4:3 só para a prévia sair com a orientação certa (em pé/deitado).
+  const alvo = tamanhoPrevia(maximaConhecida || { largura: 4032, altura: 3024 });
   const stream = await md.getUserMedia({
     audio: false,
     video: {
       deviceId: { exact: escolha.deviceId },
-      width: { ideal: RESOLUCAO_ALVO.largura },
-      height: { ideal: RESOLUCAO_ALVO.altura },
+      width: { ideal: alvo.largura },
+      height: { ideal: alvo.altura },
     },
   });
   const track = stream.getVideoTracks()[0];
 
-  // 4) Conferência: o nome do track aberto não pode ser frontal/ultrawide/auxiliar/virtual.
+  // Conferência: o nome do track aberto não pode ser frontal/ultrawide/auxiliar/virtual.
   const aberta = classificarRotulo(track.label || escolha.label);
   const set0 = track.getSettings ? track.getSettings() : {};
   if (['frontal', 'ultrawide', 'auxiliar', 'virtual'].includes(aberta.tipo) || set0.facingMode === 'user') {
@@ -209,17 +235,28 @@ export async function abrirCameraPrincipal(md) {
     throw new CameraErro('lente-errada', 'O aparelho abriu uma lente que não é a principal (1x). Use "Enviar foto".');
   }
 
-  // 5) Resolução máxima (a foto final sai no maior tamanho) e depois a pré-visualização
-  //    em resolução menor: quadros de 12 MP desenhados a cada frame travam a tela.
-  await subirResolucao(track);
-  const final = track.getSettings ? track.getSettings() : {};
-  const maxima = { largura: final.width || null, altura: final.height || null };
-  const previa = await reduzirParaPrevia(track);
+  // Resolução máxima (usada só na hora da foto): vem do cache ou das capacidades da câmera.
+  // Sem nenhuma das duas, mede como antes (sobe até o máximo e volta para a prévia).
+  let maxima = maximaConhecida && maximaConhecida.largura ? maximaConhecida : null;
+  if (!maxima) {
+    const cap = track.getCapabilities ? track.getCapabilities() : null;
+    if (cap && cap.width && cap.height && cap.width.max && cap.height.max) {
+      maxima = { largura: cap.width.max, altura: cap.height.max };
+    }
+  }
+  let previa;
+  if (maxima) {
+    const s = track.getSettings ? track.getSettings() : {};
+    previa = { largura: s.width || alvo.largura, altura: s.height || alvo.altura };
+  } else {
+    await subirResolucao(track);
+    const final = track.getSettings ? track.getSettings() : {};
+    maxima = { largura: final.width || null, altura: final.height || null };
+    previa = await reduzirParaPrevia(track);
+  }
 
-  // 6) Zoom por ÚLTIMO: trocar a resolução muda o recorte do sensor, então zerar o zoom
-  //    antes dela deixava a imagem parecendo 2x ao abrir.
+  // Zoom por ÚLTIMO (mexer na resolução depois dele muda o recorte do sensor).
   const zoomInicial = await zerarZoom(track);
-  const zoomAjustado = zoomInicial != null;
   const zoomLimites = limitesZoom(track);
 
   return {
@@ -233,13 +270,52 @@ export async function abrirCameraPrincipal(md) {
       altura: previa.altura || maxima.altura,
       maxima,
       previa,
-      zoomAjustado,
+      zoomAjustado: zoomInicial != null,
       zoom: zoomInicial,
       zoomLimites: zoomLimites ? { min: zoomLimites.min, max: zoomLimites.max, passo: zoomLimites.passo } : null,
       // O aparelho pode não deixar ir mais aberto que isto (aí não há 1x real).
       zoomPiso: zoomLimites ? Math.max(zoomLimites.min, 1) : null,
     },
   };
+}
+
+/**
+ * Abre a câmera traseira principal (maior resolução fica reservada para a foto).
+ * Nunca recorre a `video: true` nem a outra lente: se algo falhar, lança erro.
+ * @param {MediaDevices} md  navigator.mediaDevices
+ * @returns {Promise<{stream: MediaStream, info: object}>}
+ */
+export async function abrirCameraPrincipal(md) {
+  if (!md || !md.getUserMedia || !md.enumerateDevices) {
+    throw new CameraErro('sem-api', 'Este navegador não permite escolher a câmera. Use "Enviar foto".');
+  }
+
+  // Caminho rápido: lente e resolução máxima já conhecidas, um único getUserMedia.
+  const guardada = lerCache();
+  if (guardada) {
+    try {
+      const r = await abrirEscolha(md, {
+        deviceId: guardada.deviceId, label: guardada.label || '',
+        confianca: guardada.confianca || 'explicita', motivo: guardada.motivo || 'Lente principal guardada neste aparelho.',
+      }, guardada.maxima || null);
+      r.info.doCache = true;
+      return r;
+    } catch (e) {
+      // Permissão negada não se resolve com o caminho completo; qualquer outra falha apaga o cache e refaz tudo.
+      if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) throw e;
+      limparCacheCamera();
+    }
+  }
+
+  // Caminho completo (primeira vez ou lente guardada que falhou).
+  const dispositivos = await dispositivosComNome(md);
+  const escolha = escolherPrincipal(dispositivos);
+  const r = await abrirEscolha(md, escolha, null);
+  gravarCache({
+    deviceId: escolha.deviceId, label: r.info.label, confianca: escolha.confianca,
+    motivo: escolha.motivo, maxima: r.info.maxima,
+  });
+  return r;
 }
 
 /**

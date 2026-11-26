@@ -6,6 +6,25 @@ import { interpretarPayload, resumoQR } from './qr-caderno.js';
 import { GEOMETRIA_VERSAO } from './geometria.js';
 
 export const codigoDe = (av) => String(av?.layout?.codigo_caderno || 'SICEP-A').trim();
+/**
+ * Prazo de correção encerrado? Só vale quando a avaliação tem prazo válido; sem prazo nunca vence.
+ * Mesma regra de store.prazoDe (agora > fim), mas pura, para poder ser testada e usada aqui.
+ * @returns {{vencido: boolean, fim: Date|null, texto: string}}
+ */
+export function prazoVencido(av, agora = new Date()) {
+  if (!av?.prazo_correcao) return { vencido: false, fim: null, texto: '' };
+  const fim = new Date(av.prazo_correcao);
+  if (Number.isNaN(fim.getTime())) return { vencido: false, fim: null, texto: '' };
+  const texto = fim.toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  return { vencido: agora > fim, fim, texto };
+}
+
+/** Mensagem única usada em todos os bloqueios por prazo vencido. */
+export const mensagemPrazoVencido = (av, texto) =>
+  `O prazo de correção de "${av?.titulo || 'esta avaliação'}" terminou em ${texto}. Não é possível corrigir avaliações com prazo vencido.`;
+
 export const igual = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 
 /**
@@ -38,9 +57,11 @@ export function conflitosCartao(av, cartao) {
  * @returns {{tipo: 'vazio'}|{tipo:'ok', avaliacao:object, cartao:object, conflitos:string[], lido:string}
  *          |{tipo:'escolha', candidatas:object[], cartao:object}
  *          |{tipo:'outra', lido:string, esperado:string, avaliacao:object}
+ *          |{tipo:'vencida', avaliacao:object, prazo:string, lido:string}
  *          |{tipo:'nenhuma', lido:string}}
+ * `tipo: 'vencida'`: o QR é de uma avaliação com prazo de correção encerrado. Nada prossegue.
  */
-export function decidirQR(texto, { avaliacoesDaTurma, fixa }) {
+export function decidirQR(texto, { avaliacoesDaTurma, fixa, agora = new Date() }) {
   const p = interpretarPayload(texto);
   const t = p.codigo;
   if (!String(texto || '').trim() || !t) return { tipo: 'vazio' };
@@ -49,22 +70,31 @@ export function decidirQR(texto, { avaliacoesDaTurma, fixa }) {
     if (!igual(codigoDe(fixa), t)) {
       return { tipo: 'outra', lido: resumoQR(texto), esperado: codigoDe(fixa), avaliacao: fixa };
     }
+    const pz = prazoVencido(fixa, agora);
+    if (pz.vencido) return { tipo: 'vencida', avaliacao: fixa, prazo: pz.texto, lido: t };
     return { tipo: 'ok', avaliacao: fixa, cartao: p, conflitos: conflitosCartao(fixa, p), lido: t };
   }
-  const candidatas = (avaliacoesDaTurma || []).filter((a) => igual(codigoDe(a), t));
-  if (!candidatas.length) return { tipo: 'nenhuma', lido: resumoQR(texto) };
+  const todas = (avaliacoesDaTurma || []).filter((a) => igual(codigoDe(a), t));
+  if (!todas.length) return { tipo: 'nenhuma', lido: resumoQR(texto) };
+  // Avaliação com prazo vencido nunca é candidata: se não sobrar nenhuma aberta, bloqueia.
+  const candidatas = todas.filter((a) => !prazoVencido(a, agora).vencido);
+  if (!candidatas.length) {
+    return { tipo: 'vencida', avaliacao: todas[0], prazo: prazoVencido(todas[0], agora).texto, lido: t };
+  }
   if (candidatas.length > 1) return { tipo: 'escolha', candidatas, cartao: p };   // mesmo código em mais de uma avaliação: nunca adivinha
   return { tipo: 'ok', avaliacao: candidatas[0], cartao: p, conflitos: conflitosCartao(candidatas[0], p), lido: t };
 }
 
 /**
  * Valida a associação aluno ↔ turma ↔ avaliação antes de aceitar o QR e antes de lançar.
- * Barra: aluno fora da turma, avaliação não aplicada à turma, avaliação sem questões
+ * Barra: prazo de correção vencido, aluno fora da turma, avaliação não aplicada à turma, avaliação sem questões
  * e aluno que já tem resultado confirmado nessa avaliação (lançamento duplicado).
  * @param {object} store  precisa de alunosDaTurma, aplicacaoDe, resultadoDoAluno
  */
-export function validarAssociacao(store, av, alunoId, turmaId) {
+export function validarAssociacao(store, av, alunoId, turmaId, agora = new Date()) {
   if (!av) return { ok: false, motivo: 'Avaliação não identificada.' };
+  const pz = prazoVencido(av, agora);
+  if (pz.vencido) return { ok: false, motivo: mensagemPrazoVencido(av, pz.texto), prazoVencido: true };
   if (!alunoId || !turmaId) return { ok: false, motivo: 'Selecione o aluno antes de ler o caderno.' };
   if (!store.alunosDaTurma(turmaId).some((a) => a.id === alunoId)) {
     return { ok: false, motivo: 'Este aluno não pertence à turma selecionada.' };

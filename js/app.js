@@ -59,6 +59,33 @@ function resolver(hash) {
   return null;
 }
 
+/* Botão de recarregar: só aparece com internet (offline não há o que recarregar e a página
+   pode não abrir de novo). A visibilidade acompanha os eventos online/offline (ver atualizarChips). */
+function botaoRecarregar() {
+  const online = navigator.onLine;
+  return `<button class="icon-btn" type="button" data-recarregar title="Recarregar" aria-label="Recarregar" ${online ? '' : 'hidden'}>
+    ${icon('refresh', 18)}
+  </button>`;
+}
+
+function atualizarBotoesRecarregar() {
+  const online = navigator.onLine;
+  document.querySelectorAll('[data-recarregar]').forEach((b) => { b.hidden = !online; });
+}
+
+async function recarregarApp() {
+  if (!navigator.onLine) return;
+  // A câmera aberta ou uma leitura em andamento seriam perdidas: pede confirmação.
+  if (document.body.classList.contains('cam-open')
+    && !window.confirm('A leitura em andamento será perdida ao recarregar. Recarregar mesmo assim?')) return;
+  // Resultados ainda não enviados ficam guardados no aparelho (IndexedDB) e não se perdem.
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) await reg.update();   // busca versão nova do app antes de recarregar
+  } catch (_) { /* sem service worker: recarrega normalmente */ }
+  location.reload();
+}
+
 function navLink(item, ativo, compacto) {
   return `<a class="nav-link ${ativo ? 'active' : ''}" href="${item.hash}" ${ativo ? 'aria-current="page"' : ''}>
     ${icon(item.icone, compacto ? 18 : 21)}
@@ -91,6 +118,7 @@ function shell(hash, conteudo, titulo) {
       <div>SICEP+ · ${esc(usuario?.nome || '')}</div>
       <div class="nav-actions">
         ${syncChip(estado)}
+        ${botaoRecarregar()}
         <button class="icon-btn" type="button" data-sair title="Sair" aria-label="Sair">
           ${icon('logout', 18)}
         </button>
@@ -108,6 +136,7 @@ function shell(hash, conteudo, titulo) {
         </span>
       </div>
       ${syncChip(estado)}
+      ${botaoRecarregar()}
       <button class="icon-btn" type="button" data-sair title="Sair" aria-label="Sair">
         ${icon('logout', 18)}
       </button>
@@ -122,6 +151,8 @@ function shell(hash, conteudo, titulo) {
   </nav>`);
 
   app.append(sidenav, main, bottom);
+
+  app.querySelectorAll('[data-recarregar]').forEach((b) => b.addEventListener('click', recarregarApp));
 
   app.querySelectorAll('[data-sair]').forEach((b) => b.addEventListener('click', () => {
     const n = store.totalNaFilaDeEnvio();
@@ -170,8 +201,8 @@ function atualizarChips() {
   document.querySelectorAll('.sync').forEach((chip) => chip.replaceWith(el(syncChip(estado))));
 }
 store.aoMudarSincronizacao(atualizarChips);
-window.addEventListener('online', atualizarChips);
-window.addEventListener('offline', atualizarChips);
+window.addEventListener('online', () => { atualizarChips(); atualizarBotoesRecarregar(); });
+window.addEventListener('offline', () => { atualizarChips(); atualizarBotoesRecarregar(); });
 
 document.addEventListener('click', (ev) => {
   if (ev.target.closest?.('[data-sync-painel]') && store.autenticado()) abrirPainelFila();

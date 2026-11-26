@@ -3,9 +3,9 @@ import {
   el, esc, icon, toast, fmtNota, badge, situacaoBadge,
   barraDesempenho, desempenhoTexto,
 } from '../ui.js';
-import { carregarOpenCV } from '../leitor/opencv-loader.js';
+import { carregarOpenCV, precarregarOpenCV } from '../leitor/opencv-loader.js';
 import { abrirCameraPrincipal, CameraErro, prepararCaptura, fotoEmAlta, aplicarZoom, ZOOM_MAX } from '../leitor/camera.js';
-import { codigoDe, igual, decidirQR, validarAssociacao as validarAssoc } from '../leitor/associacao.js';
+import { codigoDe, igual, decidirQR, mensagemPrazoVencido, validarAssociacao as validarAssoc } from '../leitor/associacao.js';
 import { codigoDoQR } from '../leitor/qr-caderno.js';
 import { lerQR, desenharRevisao } from '../leitor/leitor.js';
 import { calcularMoldura } from '../leitor/moldura.js';
@@ -317,7 +317,11 @@ export default function leitura(params) {
     else if (ov.processando) { status = ov.cv ? 'Lendo o cartão…' : 'Carregando o leitor óptico…'; cls = 'busy'; }
     else if (ov.camErro) { status = ov.camErro; cls = 'err'; }
     else if (ov.cvErro) { status = 'Não foi possível carregar o leitor óptico.'; cls = 'err'; }
-    else if (qr) { status = ov.aviso ? '' : (ov.cv ? 'Procurando o QR Code…' : 'Carregando o leitor óptico…'); cls = ov.cv ? '' : 'busy'; }
+    else if (qr) {
+      const procurando = ov.cv || typeof BarcodeDetector !== 'undefined';
+      status = ov.aviso ? '' : (procurando ? 'Procurando o QR Code…' : 'Carregando o leitor óptico…');
+      cls = procurando ? '' : 'busy';
+    }
     else { status = ''; }   // cartão: captura livre, a detecção dos marcadores só roda depois da foto
     const s = $cf('[data-cf-status]');
     s.textContent = status;
@@ -428,6 +432,14 @@ export default function leitura(params) {
       fixa: st.avaliacaoFixa && st.avaliacaoId ? avaliacao() : null,
     });
     if (d.tipo === 'vazio') return false;
+    // Prazo de correção encerrado: proibido assim que o QR é lido. Para a leitura (ov.erro trava o ciclo)
+    // e nada é fotografado nem salvo; o professor sai por "Voltar".
+    if (d.tipo === 'vencida') {
+      ov.caderno = null; ov.escolha = null;
+      ov.erro = mensagemPrazoVencido(d.avaliacao, d.prazo);
+      atualizarOverlay();
+      return false;
+    }
     if (d.tipo === 'outra') {
       avisoTemporario(`Este QR é de outra avaliação ("${d.lido}"). Esperado: "${d.esperado}" (${d.avaliacao?.titulo || ''}).`);
       return false;
@@ -658,7 +670,7 @@ export default function leitura(params) {
     ov.timer = null;
     if (!ov.aberto) return;
     if (document.hidden) { ov.timer = setTimeout(ciclo, 1000); return; }   // aba em segundo plano: não gasta CPU
-    if (ov.passo === 'qr' && ov.cv && !ov.processando && !ov.capturando && !ov.erro && !ov.ocupado && video.videoWidth) {
+    if (ov.passo === 'qr' && (ov.cv || typeof BarcodeDetector !== 'undefined') && !ov.processando && !ov.capturando && !ov.erro && !ov.ocupado && video.videoWidth) {
       ov.ocupado = true;
       try { await analisarQuadro(); } catch (e) { console.warn('[SICEP+] leitura ao vivo:', e); } finally { ov.ocupado = false; }
     }
@@ -725,8 +737,9 @@ export default function leitura(params) {
       alvoObs.observe(cf);   // gira a tela / muda a altura visível: remede a moldura
     }
 
-    if (!ov.cv) carregarLeitor();
+    // Câmera primeiro: carregar o OpenCV (13 MB) junto travava a thread principal e atrasava a imagem.
     await ligarCamera();
+    if (!ov.cv) carregarLeitor();
     atualizarOverlay();
     if (ov.aberto && !ov.timer) ov.timer = setTimeout(ciclo, 200);
   }
@@ -1717,6 +1730,10 @@ export default function leitura(params) {
     if (st.etapa === 'conferencia') return etapaConferencia();
     return etapaResultado();
   }
+
+  // Adianta o OpenCV em segundo plano enquanto o professor ainda escolhe o aluno: quando a câmera abrir
+  // ele já está pronto e a abertura não disputa a thread principal com os 13 MB do leitor.
+  (globalThis.requestIdleCallback || ((f) => setTimeout(f, 1500)))(() => { if (!ov.cv) precarregarOpenCV(); });
 
   pintar();
   return {
