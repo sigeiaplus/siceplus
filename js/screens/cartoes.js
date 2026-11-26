@@ -226,7 +226,7 @@ export default function cartoes(params) {
           os 4 quadrados pretos dos cantos precisam sair inteiros.
           ${modo === 'gabarito' ? 'No modo <span class="strong">só o gabarito</span> o cartão não tem nome nem instruções: o aluno é identificado pelo app e a prova deve trazer o cabeçalho. ' : ''}
           ${qrModo === 'separado'
-            ? 'Com o <span class="strong">QR separado</span> o cartão sai com um quadriculado no lugar do QR (ele ajuda o leitor a saber qual lado é o de cima): <span class="strong">não cubra nem recorte essa área</span>. Cole ou imprima o QR avulso na prova e leia-o primeiro, na etapa do QR do caderno.'
+            ? 'Com o <span class="strong">QR separado</span> o cartão sai sem o QR e com o canto inferior direito em branco. Cole ou imprima o QR avulso na prova e leia-o primeiro, na etapa do QR do caderno.'
             : 'O QR Code já identifica a avaliação, o caderno e a versão do cartão.'}</span>
         </div>
       ` : `

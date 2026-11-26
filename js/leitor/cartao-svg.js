@@ -18,11 +18,9 @@
                         bolinhas (sem identificação nem instruções), para encaixar
                         numa prova que já tem o próprio cabeçalho;
    · qrModo 'junto'   → QR Code impresso no cartão (posição de geometria.js);
-   · qrModo 'separado'→ o cartão sai SEM o QR e, no lugar dele, com uma âncora de
-                        orientação (xadrez fino). O leitor decide a rotação do cartão
-                        pela densidade de tinta nessa área; sem a âncora uma folha de
-                        cabeça para baixo poderia ser lida do jeito errado. O QR sai à
-                        parte (montarQrSvg) para ser colado/impresso na prova.
+   · qrModo 'separado'→ o cartão sai SEM o QR e o canto inferior direito fica em
+                        branco (sem quadriculado). O QR sai à parte (montarQrSvg)
+                        para ser colado/impresso na prova.
    ============================================================ */
 
 import { FOLHA, MARCADOR, QR, REGIAO, GEOMETRIA_VERSAO, layoutCartao } from './geometria.js';
@@ -55,25 +53,6 @@ function qrModulos(qr) {
     }
   }
   return `<path d="${d}" fill="#000"/>`;
-}
-
-/**
- * Âncora de orientação: xadrez de módulos de 1 mm preenchendo a MESMA área do QR.
- * Tem a densidade de tinta de um QR (~50%) e nenhum padrão de localização, então
- * não é confundida com QR Code. Só entra quando o QR sai separado do cartão.
- */
-function ancoraOrientacao() {
-  const mod = 1;
-  const n = Math.round(QR.lado / mod);
-  const m = QR.lado / n;
-  let d = '';
-  for (let r = 0; r < n; r++) {
-    for (let c = 0; c < n; c++) {
-      if ((r + c) % 2 === 0) d += `M${(QR.x + c * m).toFixed(3)} ${(QR.y + r * m).toFixed(3)}h${m.toFixed(3)}v${m.toFixed(3)}h-${m.toFixed(3)}z`;
-    }
-  }
-  return `<path d="${d}" fill="#000"/>
-    <rect x="${QR.x}" y="${QR.y}" width="${QR.lado}" height="${QR.lado}" fill="none" stroke="#000" stroke-width="0.3"/>`;
 }
 
 /**
@@ -146,7 +125,7 @@ export function montarCartaoSvg(d) {
     ${campo(X + 106, 24.2, WCAB - 106, 'ESCOLA', d.escola)}
     <line x1="${X}" y1="30.4" x2="${XF}" y2="30.4" stroke="${TINTA}" stroke-width="0.35"/>`;
 
-  const qr = qrJunto ? (d.qr ? qrModulos(d.qr) : '') : ancoraOrientacao();
+  const qr = qrJunto ? (d.qr ? qrModulos(d.qr) : '') : '';
 
   /* ---------- Colunas: A B C D no topo, faixa de numeração, linhas pontilhadas ---------- */
   const yTopo = REGIAO.y0;
