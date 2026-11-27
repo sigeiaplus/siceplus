@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Cliente Supabase (REST/PostgREST)
+   SIGEIA AVALIAÇÕES · Cliente Supabase (REST/PostgREST)
    ------------------------------------------------------------
    Mesmo padrão usado pelo SIDED+ (api(path, options)).
 
@@ -40,8 +40,8 @@ async function api(path, opcoes = {}) {
 
 /* ---------------- Autenticação (mesmas credenciais do SIGEIA+/SIDED+) ----------------
    O SIDED+ autentica pela função buscar_usuario_login(login, senha), que aceita
-   login, e-mail ou CPF. O SICEP+ usa exatamente a mesma função e a mesma tabela
-   users — não existe cadastro nem senha própria do SICEP+.
+   login, e-mail ou CPF. O SIGEIA AVALIAÇÕES usa exatamente a mesma função e a mesma tabela
+   users — não existe cadastro nem senha própria do SIGEIA AVALIAÇÕES.
    ------------------------------------------------------------------------------ */
 
 export async function login(identificador, senha) {
@@ -61,7 +61,7 @@ export async function login(identificador, senha) {
 
 /**
  * O SIDED+ guarda o professor em sessionStorage.prof_data.
- * O SICEP+ resolve o mesmo vínculo a partir do usuário autenticado:
+ * O SIGEIA AVALIAÇÕES resolve o mesmo vínculo a partir do usuário autenticado:
  * users.login / users.cpf / users.nome -> professores.id_login / cpf / nome.
  */
 export async function resolverProfessor(usuario) {
@@ -82,7 +82,7 @@ export async function resolverProfessor(usuario) {
       if (linhas.length) return linhas[0];
     } catch (e) {
       // Coluna ausente em algum banco antigo: segue para a próxima tentativa.
-      console.warn('[SICEP+] vínculo com professores:', e.message);
+      console.warn('[SIGEIA AVALIAÇÕES] vínculo com professores:', e.message);
     }
   }
   return null;
@@ -346,7 +346,7 @@ export async function carregarHabilidades(turmaDisciplinaIds) {
     });
   } catch (e) {
     // Sem parâmetro_divisoes: o nome da divisão ainda pode dizer o trimestre.
-    console.warn('[SICEP+] parametro_divisoes indisponível:', e.message);
+    console.warn('[SIGEIA AVALIAÇÕES] parametro_divisoes indisponível:', e.message);
   }
 
   try {
@@ -358,7 +358,7 @@ export async function carregarHabilidades(turmaDisciplinaIds) {
       if (achado) trimestrePorDivisao.set(d.id, Number(achado[1]));
     });
   } catch (e) {
-    console.warn('[SICEP+] divisoes indisponível:', e.message);
+    console.warn('[SIGEIA AVALIAÇÕES] divisoes indisponível:', e.message);
   }
 
   const habilidades = linhas
@@ -420,7 +420,7 @@ async function inserirIdempotente(tabela, linhas) {
     } catch (e) {
       if (!recusouIdDoCliente(e)) throw e;
       idsDoCliente = false;
-      console.warn('[SICEP+] O banco não aceita id do cliente em', tabela, '— usando id do servidor.');
+      console.warn('[SIGEIA AVALIAÇÕES] O banco não aceita id do cliente em', tabela, '— usando id do servidor.');
     }
   }
   return await api(tabela, {
@@ -470,7 +470,7 @@ async function temColunaHabilidadeBncc() {
     suportaHabilidadeBncc = true;
   } catch (e) {
     suportaHabilidadeBncc = false;
-    console.warn('[SICEP+] coluna habilidade_bncc indisponível:', e.message);
+    console.warn('[SIGEIA AVALIAÇÕES] coluna habilidade_bncc indisponível:', e.message);
   }
   return suportaHabilidadeBncc;
 }
@@ -955,12 +955,12 @@ export async function registrarScan({ resultado_id, imagem_url, respostas_detect
 
 /**
  * A avaliação do SIDED+ pertence a UMA turma (avaliacoes.turma_id).
- * Um instrumento do SICEP+ pode valer para várias turmas, portanto o vínculo
+ * Um instrumento do SIGEIA AVALIAÇÕES pode valer para várias turmas, portanto o vínculo
  * é por turma — nunca um id único no instrumento (era isso que fazia o envio
  * de uma turma cair na avaliação/turma da primeira e criava registros repetidos).
  */
 
-/** Id guardado no SICEP+ só vale se for mesmo da turma que está sendo enviada. */
+/** Id guardado no SIGEIA AVALIAÇÕES só vale se for mesmo da turma que está sendo enviada. */
 async function sidedDaTurma(sidedId, turmaId) {
   if (!sidedId) return null;
   try {
@@ -1019,7 +1019,7 @@ export async function enviarNotasSided({ avaliacaoSicep, turma, turmaDisciplinaI
         turma_disciplina_id: turmaDisciplinaId || null,
         disciplina: avaliacaoSicep.disciplina || null,
         data: avaliacaoSicep.data_aplicacao || null,
-        observacoes: 'Registrada pelo SICEP+',
+        observacoes: 'Registrada pelo SIGEIA AVALIAÇÕES',
       }),
     }) || [];
     if (!nova?.id) throw new Error('O SIDED+ não devolveu a avaliação criada.');

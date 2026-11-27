@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Utilitários de interface
+   SIGEIA AVALIAÇÕES · Utilitários de interface
    ============================================================ */
 
 export function el(html) {

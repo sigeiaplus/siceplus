@@ -39,7 +39,7 @@ export default function avaliacoes() {
         <div class="row wrap" style="gap:6px">
           ${syncAvaliacaoBadge(av.sync)}
           ${prazoChip(store.prazoDe(av))}
-          ${av.lancar_sided ? '<span class="badge y">SIDED+</span>' : '<span class="badge">Somente SICEP+</span>'}
+          ${av.lancar_sided ? '<span class="badge y">SIDED+</span>' : '<span class="badge">Somente SIGEIA AVALIAÇÕES</span>'}
         </div>
 
         <div class="av-foot">

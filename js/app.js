@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Bootstrap, shell e roteador
+   SIGEIA AVALIAÇÕES · Bootstrap, shell e roteador
 
    Dados 100% reais: sem sessão ou sem conexão a aplicação mostra o
    motivo, nunca preenche a tela com dados fictícios.
@@ -105,7 +105,7 @@ function shell(hash, conteudo, titulo) {
     <div class="brand">
       <span class="mark"><img src="assets/icons/icon.svg" alt="" /></span>
       <span>
-        <span class="brand-name">SICEP+</span>
+        <span class="brand-name">SIGEIA AVALIAÇÕES</span>
         <span class="brand-sub">Correção de provas</span>
       </span>
     </div>
@@ -115,7 +115,7 @@ function shell(hash, conteudo, titulo) {
     </nav>
     <div class="nav-foot">
       <div class="strong" style="color:var(--ink-2)">${esc(usuario?.escola || '')}</div>
-      <div>SICEP+ · ${esc(usuario?.nome || '')}</div>
+      <div>SIGEIA AVALIAÇÕES · ${esc(usuario?.nome || '')}</div>
       <div class="nav-actions">
         ${syncChip(estado)}
         ${botaoRecarregar()}
@@ -131,7 +131,7 @@ function shell(hash, conteudo, titulo) {
       <div class="brand">
         <span class="mark"><img src="assets/icons/icon.svg" alt="" /></span>
         <span>
-          <span class="brand-name">SICEP+</span>
+          <span class="brand-name">SIGEIA AVALIAÇÕES</span>
           <span class="brand-sub">${esc(titulo || '')}</span>
         </span>
       </div>
@@ -183,7 +183,7 @@ function render() {
   if (typeof resultado?.destroy === 'function') limpezaAtual = resultado.destroy;
 
   app.replaceChildren(shell(hash, conteudo, alvo.rota.titulo));
-  document.title = 'SICEP+ · ' + (alvo.rota.titulo || 'Início');
+  document.title = 'SIGEIA AVALIAÇÕES · ' + (alvo.rota.titulo || 'Início');
   window.scrollTo({ top: 0 });
 }
 
@@ -227,7 +227,7 @@ function montarLogin() {
       montarApp();
     },
   }));
-  document.title = 'SICEP+ · Entrar';
+  document.title = 'SIGEIA AVALIAÇÕES · Entrar';
 }
 
 function removerListener() {
@@ -240,7 +240,7 @@ if (boot.estado === 'sem-sessao') {
   montarLogin();
 } else if (boot.estado !== 'pronto') {
   document.getElementById('app').replaceChildren(estadoScreen(boot.estado, boot.erro));
-  document.title = 'SICEP+';
+  document.title = 'SIGEIA AVALIAÇÕES';
 } else {
   montarApp();
 }
@@ -248,6 +248,6 @@ if (boot.estado === 'sem-sessao') {
 /* Service worker (PWA) — apenas fora do ambiente local */
 if ('serviceWorker' in navigator && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('[SICEP+] SW', e));
+    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('[SIGEIA AVALIAÇÕES] SW', e));
   });
 }

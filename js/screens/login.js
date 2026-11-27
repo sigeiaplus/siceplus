@@ -19,7 +19,7 @@ function mascararCpf(input) {
 }
 
 /**
- * Login individual do SICEP+ com a MESMA credencial do SIGEIA+/SIDED+
+ * Login individual do SIGEIA AVALIAÇÕES com a MESMA credencial do SIGEIA+/SIDED+
  * (login, e-mail ou CPF + senha, tabela users). Nada de cadastro novo.
  */
 export default function login({ aoEntrar } = {}) {
@@ -28,7 +28,7 @@ export default function login({ aoEntrar } = {}) {
       <aside class="login-hero">
         <div class="login-hero-top">
           <span class="mark lg"><img src="assets/icons/icon.svg" alt="" /></span>
-          <span class="login-hero-name">SICEP<span>+</span></span>
+          <span class="login-hero-name">SIGEIA<span> AVALIAÇÕES</span></span>
         </div>
 
         <div class="login-hero-mid">
@@ -45,14 +45,14 @@ export default function login({ aoEntrar } = {}) {
           </ul>
         </div>
 
-        <div class="login-hero-foot">SICEP+ · integrado ao SIGEIA+/SIDED+</div>
+        <div class="login-hero-foot">SIGEIA AVALIAÇÕES · integrado ao SIGEIA+/SIDED+</div>
       </aside>
 
       <main class="login-panel">
         <div class="login-card">
           <div class="login-brand-mobile">
             <span class="mark lg"><img src="assets/icons/icon.svg" alt="" /></span>
-            <span class="login-hero-name">SICEP<span>+</span></span>
+            <span class="login-hero-name">SIGEIA<span> AVALIAÇÕES</span></span>
           </div>
 
           <form class="login-form" data-form novalidate>
@@ -90,7 +90,7 @@ export default function login({ aoEntrar } = {}) {
             </button>
 
             <p class="login-note">
-              Sua conta é a mesma do SIGEIA+/SIDED+ — não existe senha própria do SICEP+.
+              Sua conta é a mesma do SIGEIA+/SIDED+ — não existe senha própria do SIGEIA AVALIAÇÕES.
             </p>
           </form>
 
@@ -162,7 +162,7 @@ export default function login({ aoEntrar } = {}) {
       rotulo.textContent = 'Pronto';
       if (typeof aoEntrar === 'function') await aoEntrar();
     } catch (e) {
-      console.error('[SICEP+] login', e);
+      console.error('[SIGEIA AVALIAÇÕES] login', e);
       mostrarErro('Erro inesperado ao entrar. Tente novamente.');
     } finally {
       enviando = false;

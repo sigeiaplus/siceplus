@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Etapa 4C — Desempenho por habilidade
+   SIGEIA AVALIAÇÕES · Etapa 4C — Desempenho por habilidade
 
    Cálculo puro (sem DOM, sem rede) a partir do que já está em
    memória/cache: avaliações com questoes.habilidade_bncc,

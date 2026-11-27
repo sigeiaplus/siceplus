@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · OMR — pipeline completo de leitura do cartão
+   SIGEIA AVALIAÇÕES · OMR — pipeline completo de leitura do cartão
    ------------------------------------------------------------
    Une as etapas do leitor.js (OpenCV) em uma chamada só:
      foto → 4 marcadores → perspectiva → QR → conferência da grade
@@ -69,7 +69,7 @@ const MOTIVOS = {
       : 'Não achei os 4 quadrados pretos dos cantos. Mostre o cartão inteiro, com boa luz e sem sombra.'),
   cartao_cortado: () => 'Os quadrados dos cantos estão na beirada da foto: o cartão foi cortado. Afaste a câmera e enquadre a folha inteira, com uma margem em volta.',
   alinhamento: () => 'Os quadrados dos cantos não bateram com o cartão. Fotografe de frente, sem dobras e com os 4 quadrados inteiros dentro da foto — se algum canto estiver cortado, o cartão não é lido.',
-  versao_diferente: (c) => `Este cartão foi impresso com o layout v${c.geometria} do cartão-resposta e o SICEP+ atual usa o v${GEOMETRIA_VERSAO}. Gere e imprima um cartão novo desta avaliação (aba Cartões).`,
+  versao_diferente: (c) => `Este cartão foi impresso com o layout v${c.geometria} do cartão-resposta e o SIGEIA AVALIAÇÕES atual usa o v${GEOMETRIA_VERSAO}. Gere e imprima um cartão novo desta avaliação (aba Cartões).`,
   cartao_outra_versao: (c) => `As bolinhas deste cartão não batem com a avaliação: o cartão impresso usa ${c.grade.cols} coluna(s) × ${c.grade.rows} linha(s) e esta avaliação usa ${c.atual?.colunas} × ${c.atual?.linhas}. Ele foi impresso antes de a avaliação ser alterada (ou em outra versão do cartão). Gere e imprima um cartão novo na aba Cartões.`,
   questoes_diferentes: (c) => `O QR deste cartão diz ${c.questoes} questões, mas a avaliação tem ${c.avaliacao}. O cartão é de outra versão da avaliação — imprima um cartão novo.`,
   alternativas_diferentes: (c) => `O QR deste cartão diz ${c.alternativas} alternativas, mas a avaliação tem ${c.avaliacaoAlts}. Imprima um cartão novo desta avaliação.`,
@@ -218,7 +218,7 @@ export async function processarCartao(cv, imagem, o = {}) {
       ms: Date.now() - t0,
     };
   } catch (e) {
-    console.error('[SICEP+] processarCartao', e);
+    console.error('[SIGEIA AVALIAÇÕES] processarCartao', e);
     return falha('erro', { detalhe: e?.message || String(e) });
   } finally {
     al.cinza.delete();

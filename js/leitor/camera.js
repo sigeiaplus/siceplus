@@ -1,4 +1,4 @@
-/* SICEP+ · Seleção da câmera traseira PRINCIPAL (1x) e resolução máxima.
+/* SIGEIA AVALIAÇÕES · Seleção da câmera traseira PRINCIPAL (1x) e resolução máxima.
  *
  * Regras (mudança 1):
  *  - usa somente a câmera traseira principal; nunca ultrawide (0,5x), tele, macro, profundidade ou frontal;
@@ -71,7 +71,7 @@ export function escolherPrincipal(dispositivos) {
   if (lista.every((d) => !String(d.label || '').trim())) {
     throw new CameraErro('sem-nomes',
       'Este navegador não informa o nome das câmeras, então não consigo garantir a lente principal (1x). ' +
-      'Use "Enviar foto" ou abra o SICEP+ no Chrome (Android) ou no Safari (iPhone).');
+      'Use "Enviar foto" ou abra o SIGEIA AVALIAÇÕES no Chrome (Android) ou no Safari (iPhone).');
   }
 
   const analisadas = lista.map((d) => ({ d, c: classificarRotulo(d.label) }));

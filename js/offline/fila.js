@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Fila de sincronização offline — Etapa 6D
+   SIGEIA AVALIAÇÕES · Fila de sincronização offline — Etapa 6D
 
    Resultados gravados sem internet (ou que falharam por rede) ficam
    na fila IndexedDB e são enviados ao Supabase quando possível.
@@ -337,7 +337,7 @@ async function rodarFila(usuarioId, { aoSincronizar }) {
       });
       if (final) {
         resumo.sincronizados += 1;
-        if (aoSincronizar) { try { await aoSincronizar(final, linha); } catch (e) { console.warn('[SICEP+] aoSincronizar', e); } }
+        if (aoSincronizar) { try { await aoSincronizar(final, linha); } catch (e) { console.warn('[SIGEIA AVALIAÇÕES] aoSincronizar', e); } }
       }
     } catch (e) {
       // Divergência entre a edição local e a nuvem: guarda as duas versões e para este alvo.
@@ -367,7 +367,7 @@ async function rodarFila(usuarioId, { aoSincronizar }) {
       await banco.filaAtualizar(emEnvio.seq, (x) => (x.status === STATUS.SINCRONIZANDO
         ? { ...x, status: STATUS.ERRO, erro: mensagemDoErro(e), codigo_erro: e?.codigo || null, permanente: !transitoria, scan_ok: emEnvio.scan_ok }
         : null));
-      console.warn('[SICEP+] sincronizar item', emEnvio.tipo, emEnvio.resultado_id || emEnvio.avaliacao_id, e?.message || e);
+      console.warn('[SIGEIA AVALIAÇÕES] sincronizar item', emEnvio.tipo, emEnvio.resultado_id || emEnvio.avaliacao_id, e?.message || e);
       if (transitoria) { resumo.parou = 'rede'; avisarMudanca(); break; } // rede caiu: não adianta seguir; a ordem se mantém
       marcarBloqueio(emEnvio);
     }

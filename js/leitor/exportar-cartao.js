@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Exportação do cartão (e do QR) em PDF ou PNG
+   SIGEIA AVALIAÇÕES · Exportação do cartão (e do QR) em PDF ou PNG
    ------------------------------------------------------------
    Recebe o SVG que o cartao-svg.js já desenhou (a mesma fonte da impressão e da
    leitura) e o converte, sem biblioteca externa:
@@ -313,7 +313,7 @@ export function svgParaPdfTexto(svg, { larguraMm, alturaMm, pagina = 'exata', ti
   add(`<< /Length ${conteudo.length} >>\nstream\n${conteudo}endstream`);
   add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
   add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
-  const info = add(`<< /Title (${textoPdf(titulo)}) /Producer (SICEP+) >>`);
+  const info = add(`<< /Title (${textoPdf(titulo)}) /Producer (SIGEIA AVALIAÇÕES) >>`);
 
   let pdf = '%PDF-1.4\n%\u00e2\u00e3\u00cf\u00d3\n';
   const offs = [];

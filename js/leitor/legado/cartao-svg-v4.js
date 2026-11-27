@@ -1,12 +1,12 @@
 /* ============================================================
-   SICEP+ · Desenho do cartão de respostas (SVG em milímetros)
+   SIGEIA AVALIAÇÕES · Desenho do cartão de respostas (SVG em milímetros)
    ------------------------------------------------------------
    Módulo puro (sem DOM): recebe os dados e devolve o texto SVG.
    Todas as posições de questões/bolinhas vêm de geometria.js — a MESMA
    fonte usada pelo leitor (leitor.js). O cabeçalho e o rodapé são apenas
    desenho: não deslocam a grade.
 
-   O cartão não exibe a marca SICEP+: só escola, aluno, turma, avaliação
+   O cartão não exibe a marca SIGEIA AVALIAÇÕES: só escola, aluno, turma, avaliação
    e o caderno. Os 4 quadrados pretos e o QR Code são obrigatórios.
    ============================================================ */
 

@@ -13,7 +13,7 @@ function qrObjeto(texto) {
     qr.make();
     return qr;
   } catch (e) {
-    console.warn('[SICEP+] QR Code:', e);
+    console.warn('[SIGEIA AVALIAÇÕES] QR Code:', e);
     return null;
   }
 }
@@ -108,7 +108,7 @@ export default function cartoes(params) {
       baixarBlob(blob, `${nome}.${formato}`);
       toast(`${formato.toUpperCase()} gerado.`, 'ok');
     } catch (e) {
-      console.warn('[SICEP+] exportar:', e);
+      console.warn('[SIGEIA AVALIAÇÕES] exportar:', e);
       toast(e?.message || 'Não foi possível gerar o arquivo.', 'err');
     } finally {
       exportando = false;

@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Geometria do cartão de respostas
+   SIGEIA AVALIAÇÕES · Geometria do cartão de respostas
    ------------------------------------------------------------
    Fonte única de verdade para IMPRESSÃO (cartao-svg.js) e LEITURA
    (leitor.js). Tudo em milímetros, na folha de 186 × 273 mm.

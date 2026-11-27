@@ -249,7 +249,7 @@ export default function avaliacaoDetalhe(params) {
           ${statusAvaliacao(av.status)}
           ${syncAvaliacaoBadge(av.sync)}
           ${prazoChip(prazo)}
-          ${av.lancar_sided ? '<span class="badge y">Integra SIDED+</span>' : '<span class="badge">Somente SICEP+</span>'}
+          ${av.lancar_sided ? '<span class="badge y">Integra SIDED+</span>' : '<span class="badge">Somente SIGEIA AVALIAÇÕES</span>'}
         </div>
       </div>
 

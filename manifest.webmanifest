@@ -1,7 +1,7 @@
 {
-  "name": "SICEP+ · Correção de provas",
-  "short_name": "SICEP+",
-  "description": "Sistema Inteligente de Correção Escolar de Provas por cartão de respostas.",
+  "name": "SIGEIA AVALIAÇÕES · Correção de provas",
+  "short_name": "SIGEIA AVALIAÇÕES",
+  "description": "Correção escolar de provas por cartão de respostas por cartão de respostas.",
   "lang": "pt-BR",
   "start_url": "./",
   "scope": "./",

@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Painel da fila de sincronização (Etapa 6D)
+   SIGEIA AVALIAÇÕES · Painel da fila de sincronização (Etapa 6D)
 
    Mostra os resultados que ainda não chegaram à nuvem, o status de cada um
    (pendente, enviando, erro), e permite tentar de novo ou descartar um item

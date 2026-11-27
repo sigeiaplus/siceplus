@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Geometria v3 do cartão de respostas (leitura de cartões antigos)
+   SIGEIA AVALIAÇÕES · Geometria v3 do cartão de respostas (leitura de cartões antigos)
    ------------------------------------------------------------
    Cópia fiel do layout v3, que era o usado na impressão antes da v4.
    A leitura usa ESTA geometria só quando a folha impressa é comprovadamente

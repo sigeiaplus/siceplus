@@ -1,4 +1,4 @@
-/* SICEP+ · Geometria da moldura de enquadramento da câmera.
+/* SIGEIA AVALIAÇÕES · Geometria da moldura de enquadramento da câmera.
  *
  * A prévia usa object-fit: contain: quando a câmera entrega um quadro com proporção
  * diferente da tela, a imagem ocupa só uma faixa (com preto em cima e embaixo). A moldura

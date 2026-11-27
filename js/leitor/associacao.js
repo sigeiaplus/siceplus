@@ -1,4 +1,4 @@
-/* SICEP+ · Associação aluno ↔ caderno (QR) ↔ avaliação.
+/* SIGEIA AVALIAÇÕES · Associação aluno ↔ caderno (QR) ↔ avaliação.
  * Lógica pura (sem DOM) para poder ser testada fora do navegador.
  */
 

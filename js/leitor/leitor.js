@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Leitor óptico (OpenCV.js)
+   SIGEIA AVALIAÇÕES · Leitor óptico (OpenCV.js)
    ------------------------------------------------------------
    Este módulo não toca no DOM: recebe `cv` e imagens RGBA
    ({ data, width, height }) e devolve dados puros. Assim roda
@@ -688,7 +688,7 @@ export function lerQRNaFolha(cv, rgbaAlinhada) {
     }
     return null;
   } catch (e) {
-    console.warn('[SICEP+] QR na folha:', e);
+    console.warn('[SIGEIA AVALIAÇÕES] QR na folha:', e);
     return null;
   } finally {
     limpar();
@@ -747,7 +747,7 @@ export async function lerQR(cv, imagem, fallbackCanvas = null, opcoes = {}) {
       }
     }
   } catch (e) {
-    console.warn('[SICEP+] QR via OpenCV:', e);
+    console.warn('[SIGEIA AVALIAÇÕES] QR via OpenCV:', e);
   } finally {
     limpar();
   }

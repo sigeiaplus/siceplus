@@ -39,7 +39,7 @@ const ROTULO_ESTADO = {
  * da tela (o que o professor deve fazer agora).
  */
 const DICA_BLOQUEIO = {
-  cartao_outra_versao: 'Imprima um cartão novo na aba Cartões — o cartão antigo não pode ser lido por esta versão do SICEP+.',
+  cartao_outra_versao: 'Imprima um cartão novo na aba Cartões — o cartão antigo não pode ser lido por esta versão do SIGEIA AVALIAÇÕES.',
   versao_diferente: 'Os cartões já impressos continuam válidos para a conferência manual, mas precisam ser reimpressos para a leitura automática.',
   cartao_cortado: 'Dica: enquadre a folha inteira, deixando uma margem branca em volta dos 4 quadrados pretos.',
 };
@@ -200,7 +200,7 @@ export default function leitura(params) {
       stream = r.stream;
       ov.camInfo = r.info;
       ov.zoom = r.info.zoom;
-      console.info('[SICEP+] câmera:', r.info.label, r.info.largura + 'x' + r.info.altura,
+      console.info('[SIGEIA AVALIAÇÕES] câmera:', r.info.label, r.info.largura + 'x' + r.info.altura,
         '(' + r.info.confianca + ')', 'zoom', r.info.zoom, 'de', r.info.zoomLimites);
       if (r.info.zoomPiso > 1.01) {
         avisoTemporario(`Este aparelho não deixa a câmera mais aberta que ${String(r.info.zoomPiso).replace('.', ',')}x — afaste o celular para enquadrar o cartão inteiro.`, 6000);
@@ -217,7 +217,7 @@ export default function leitura(params) {
       video.setAttribute('playsinline', '');
       video.muted = true;
       await video.play();
-    } catch (e) { console.warn('[SICEP+] play() bloqueado:', e); }
+    } catch (e) { console.warn('[SIGEIA AVALIAÇÕES] play() bloqueado:', e); }
 
     if (!stream) return;   // a câmera foi fechada enquanto o vídeo iniciava
     const track = stream.getVideoTracks()[0];
@@ -546,7 +546,7 @@ export default function leitura(params) {
     try {
       r = await processarCartao(ov.cv, imagem, { ...opcoesDeLeitura(), canvasQR: imagem.canvas || null });
     } catch (e) {
-      console.error('[SICEP+] processarCartao:', e);
+      console.error('[SIGEIA AVALIAÇÕES] processarCartao:', e);
       r = { ok: false, bloqueado: true, motivo: 'erro', mensagem: 'Erro ao processar a imagem: ' + (e?.message || e) };
     }
     ov.processando = false;
@@ -596,7 +596,7 @@ export default function leitura(params) {
       const blob = await fotoEmAlta(stream);
       if (blob) return await imagemDoArquivo(blob, MAX_LADO_FOTO);
     } catch (e) {
-      console.warn('[SICEP+] ImageCapture:', e);
+      console.warn('[SIGEIA AVALIAÇÕES] ImageCapture:', e);
     }
     const track = stream.getVideoTracks()[0];
     if (!track || !ov.camInfo?.maxima?.largura) return quadroDoVideo(MAX_LADO_FOTO);
@@ -672,7 +672,7 @@ export default function leitura(params) {
     if (document.hidden) { ov.timer = setTimeout(ciclo, 1000); return; }   // aba em segundo plano: não gasta CPU
     if (ov.passo === 'qr' && (ov.cv || typeof BarcodeDetector !== 'undefined') && !ov.processando && !ov.capturando && !ov.erro && !ov.ocupado && video.videoWidth) {
       ov.ocupado = true;
-      try { await analisarQuadro(); } catch (e) { console.warn('[SICEP+] leitura ao vivo:', e); } finally { ov.ocupado = false; }
+      try { await analisarQuadro(); } catch (e) { console.warn('[SIGEIA AVALIAÇÕES] leitura ao vivo:', e); } finally { ov.ocupado = false; }
     }
     if (ov.aberto) ov.timer = setTimeout(ciclo, 500);
   }

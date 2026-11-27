@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Camada de dados — SOMENTE dados reais (Supabase)
+   SIGEIA AVALIAÇÕES · Camada de dados — SOMENTE dados reais (Supabase)
 
    Não existe modo demonstração: se a sessão ou a conexão
    falharem, a interface mostra o motivo e não preenche a tela
@@ -201,7 +201,7 @@ export async function iniciar() {
         falhaHabilidades = e;
       }
       if (falhaHabilidades) {
-        console.warn('[SICEP+] habilidades indisponíveis, mantendo as já carregadas:', falhaHabilidades.message);
+        console.warn('[SIGEIA AVALIAÇÕES] habilidades indisponíveis, mantendo as já carregadas:', falhaHabilidades.message);
         habilidades = db.habilidades || [];
         // Reabriu o app agora: a memória está vazia, mas a cópia local tem a última lista boa.
         if (!habilidades.length) {
@@ -231,7 +231,7 @@ export async function iniciar() {
   }
 
   // A nuvem falhou: nunca apaga o que já existe localmente.
-  console.warn('[SICEP+] Nuvem indisponível, tentando a cópia local:', falhaNuvem?.message);
+  console.warn('[SIGEIA AVALIAÇÕES] Nuvem indisponível, tentando a cópia local:', falhaNuvem?.message);
 
   const copia = await offline.lerCache(usuarioId).catch(() => null);
   if (copia) {
@@ -257,7 +257,7 @@ export async function iniciar() {
     return { estado, erro: null, recursos, origem };
   }
 
-  console.error('[SICEP+] Falha ao carregar dados reais:', falhaNuvem);
+  console.error('[SIGEIA AVALIAÇÕES] Falha ao carregar dados reais:', falhaNuvem);
   estado = 'erro';
   erro = falhaNuvem?.message || 'Falha ao carregar os dados.';
   db = vazio();
@@ -417,7 +417,7 @@ export function urlLogin() { return CONFIG.loginUrl; }
 
 const PERFIS_PERMITIDOS = ['professor', 'admin', 'diretor', 'especialista', 'secretaria'];
 
-/** Login próprio do SICEP+ com as mesmas credenciais do SIGEIA+/SIDED+. */
+/** Login próprio do SIGEIA AVALIAÇÕES com as mesmas credenciais do SIGEIA+/SIDED+. */
 export async function entrar(identificador, senha) {
   const login = String(identificador || '').trim();
   if (!login || !senha) return { ok: false, erro: 'Preencha o acesso e a senha.' };
@@ -437,7 +437,7 @@ export async function entrar(identificador, senha) {
   if (!usuario) return { ok: false, erro: 'CPF/e-mail ou senha incorretos.' };
 
   if (usuario.role && !PERFIS_PERMITIDOS.includes(usuario.role)) {
-    return { ok: false, erro: 'O SICEP+ é exclusivo para professores e gestão escolar.' };
+    return { ok: false, erro: 'O SIGEIA AVALIAÇÕES é exclusivo para professores e gestão escolar.' };
   }
 
   const professor = await nuvem.resolverProfessor(usuario);
@@ -1168,7 +1168,7 @@ export async function confirmarResultado(id) {
 }
 
 /**
- * Exclui somente o resultado do SICEP+. A nota já enviada ao SIDED+ não é
+ * Exclui somente o resultado do SIGEIA AVALIAÇÕES. A nota já enviada ao SIDED+ não é
  * apagada por aqui: notas do SIDED+ podem ter sido editadas pelo professor.
  */
 export async function excluirResultado(id) {
@@ -1334,8 +1334,8 @@ export async function enviarAoSided(avaliacaoId, turmaId, resultadoIds = null) {
           body: JSON.stringify({ enviado_sided_em: agora }),
         });
       } catch (e) {
-        console.warn('[SICEP+] enviado_sided_em:', e.message);
-        aviso = 'As notas foram gravadas no SIDED+, mas não consegui registrar o envio no SICEP+. Ao recarregar elas podem voltar como pendentes; reenviar é seguro (não duplica).';
+        console.warn('[SIGEIA AVALIAÇÕES] enviado_sided_em:', e.message);
+        aviso = 'As notas foram gravadas no SIDED+, mas não consegui registrar o envio no SIGEIA AVALIAÇÕES. Ao recarregar elas podem voltar como pendentes; reenviar é seguro (não duplica).';
       }
     } else {
       aviso = 'As notas foram gravadas no SIDED+, mas o banco ainda não tem a coluna enviado_sided_em: o estado de envio não fica salvo depois de recarregar.';
@@ -1554,7 +1554,7 @@ export async function enviarAusenciasAoSided(avaliacaoId, turmaId) {
         { method: 'PATCH', body: JSON.stringify({ enviado_sided_em: agora }) }
       );
     } catch (e) {
-      aviso = 'As ausências foram gravadas no SIDED+, mas não consegui registrar o envio no SICEP+. Reenviar é seguro (não duplica).';
+      aviso = 'As ausências foram gravadas no SIDED+, mas não consegui registrar o envio no SIGEIA AVALIAÇÕES. Reenviar é seguro (não duplica).';
     }
     apl.sided_avaliacao_id = r.sided_avaliacao_id;
     const alvoAv = db.avaliacoes.find((x) => x.id === av.id);
@@ -1714,7 +1714,7 @@ async function aplicarFilaNoEstado() {
     });
     await atualizarEstadoDaFila();
   } catch (e) {
-    console.warn('[SICEP+] fila ao abrir:', e);
+    console.warn('[SIGEIA AVALIAÇÕES] fila ao abrir:', e);
   }
 }
 

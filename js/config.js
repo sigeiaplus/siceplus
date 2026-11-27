@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Configuração de integração
+   SIGEIA AVALIAÇÕES · Configuração de integração
    ------------------------------------------------------------
    Este arquivo fica SOMENTE no código-fonte. Nada aqui é exibido
    na interface: o usuário vê apenas "Sincronização na nuvem".
@@ -8,7 +8,7 @@
    NUNCA coloque service_role no cliente.
 
    A sessão do usuário continua vindo do login existente do
-   SIGEIA+/SIDED+ (sessionStorage ded_user / prof_data). O SICEP+
+   SIGEIA+/SIDED+ (sessionStorage ded_user / prof_data). O SIGEIA AVALIAÇÕES
    não tem tela de login própria.
    ============================================================ */
 

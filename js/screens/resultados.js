@@ -226,7 +226,7 @@ export default function resultados() {
       const r = store.resultados().find((x) => x.id === [...st.sel][0]);
       if (!r) return;
       if (r.enviado_em && !window.confirm(
-        'Esta nota já foi enviada ao SIDED+.\n\nA nova leitura altera só o resultado no SICEP+; a nota no SIDED+ não será modificada.\n\nReler o cartão?'
+        'Esta nota já foi enviada ao SIDED+.\n\nA nova leitura altera só o resultado no SIGEIA AVALIAÇÕES; a nota no SIDED+ não será modificada.\n\nReler o cartão?'
       )) return;
       location.hash = `#/leitura/${r.avaliacao_id}/${r.aluno_id}`;
     });

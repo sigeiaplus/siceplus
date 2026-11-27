@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Carregador do OpenCV.js
+   SIGEIA AVALIAÇÕES · Carregador do OpenCV.js
    ------------------------------------------------------------
    O arquivo (js/lib/opencv.js, ~13 MB) fica no próprio projeto:
    o app funciona offline e o service worker o guarda em cache

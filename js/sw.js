@@ -1,4 +1,4 @@
-/* SICEP+ · Service Worker (app shell) */
+/* SIGEIA AVALIAÇÕES · Service Worker (app shell) */
 
 // Suba o número a cada entrega que mude arquivos do app (força o aparelho a baixar tudo de novo).
 const CACHE = 'sicep-v2';

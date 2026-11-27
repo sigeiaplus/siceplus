@@ -5,7 +5,7 @@ const CONTEUDO = {
     icone: 'alert',
     titulo: 'Integração não configurada',
     texto: 'Faltam a URL e a chave publishable do projeto Supabase em <span class="mono">js/config.js</span>. '
-      + 'O SICEP+ não exibe dados até a conexão existir.',
+      + 'O SIGEIA AVALIAÇÕES não exibe dados até a conexão existir.',
     acao: null,
   },
   'sem-sessao': {
@@ -32,7 +32,7 @@ export default function estadoScreen(estado, detalhe) {
         <div class="login-brand">
           <span class="mark lg"><img src="assets/icons/icon.svg" alt="" /></span>
           <div>
-            <h1>SICEP+</h1>
+            <h1>SIGEIA AVALIAÇÕES</h1>
             <p class="small muted">Correção escolar de provas por cartão de respostas</p>
           </div>
         </div>
@@ -54,7 +54,7 @@ export default function estadoScreen(estado, detalhe) {
           ${cfg.acao?.retry ? `<button class="btn btn-primary btn-block" type="button" data-retry>${cfg.acao.rotulo}</button>` : ''}
         </div>
 
-        <p class="xs muted center" style="margin-top:14px">SICEP+ · integrado ao SIDED+</p>
+        <p class="xs muted center" style="margin-top:14px">SIGEIA AVALIAÇÕES · integrado ao SIDED+</p>
       </div>
     </div>
   `);

@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Chamada da avaliação (presente / falta / pendente)
+   SIGEIA AVALIAÇÕES · Chamada da avaliação (presente / falta / pendente)
 
    Tela própria, aberta pelo botão "Chamada" em Avaliações.
    - Uma turma por vez: avaliação com várias turmas pede para escolher a turma.

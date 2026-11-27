@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Conteúdo do QR Code do cartão
+   SIGEIA AVALIAÇÕES · Conteúdo do QR Code do cartão
    ------------------------------------------------------------
    O QR identifica o CADERNO (código da avaliação), a versão do caderno,
    a versão da geometria do cartão e o tamanho da grade (questões ×

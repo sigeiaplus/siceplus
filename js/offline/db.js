@@ -1,5 +1,5 @@
 /* ============================================================
-   SICEP+ · Armazenamento local (IndexedDB) — Etapa 6B
+   SIGEIA AVALIAÇÕES · Armazenamento local (IndexedDB) — Etapa 6B
 
    Guarda uma CÓPIA dos dados que vieram do Supabase e a sessão
    autenticada, para o app reabrir sem internet.
@@ -76,8 +76,8 @@ export function abrir() {
       idb.onversionchange = () => { idb.close(); abertura = null; };
       ok(idb);
     };
-    req.onerror = () => { console.warn('[SICEP+] IndexedDB indisponível:', req.error); ok(null); };
-    req.onblocked = () => console.warn('[SICEP+] IndexedDB bloqueado por outra aba.');
+    req.onerror = () => { console.warn('[SIGEIA AVALIAÇÕES] IndexedDB indisponível:', req.error); ok(null); };
+    req.onblocked = () => console.warn('[SIGEIA AVALIAÇÕES] IndexedDB bloqueado por outra aba.');
   }).then((idb) => { if (!idb) abertura = null; return idb; });
 
   return abertura;
@@ -97,7 +97,7 @@ export async function gravar(loja, usuarioId, id, dados) {
     await fimDaTransacao(tx);
     return true;
   } catch (e) {
-    console.warn('[SICEP+] gravar', loja, e);
+    console.warn('[SIGEIA AVALIAÇÕES] gravar', loja, e);
     return false;
   }
 }
@@ -110,7 +110,7 @@ export async function ler(loja, usuarioId, id) {
     const linha = await aoRedor(idb.transaction(loja, 'readonly').objectStore(loja).get(chave(usuarioId, id)));
     return linha && linha.usuario_id === usuarioId ? linha.dados : null;
   } catch (e) {
-    console.warn('[SICEP+] ler', loja, e);
+    console.warn('[SIGEIA AVALIAÇÕES] ler', loja, e);
     return null;
   }
 }
@@ -125,7 +125,7 @@ export async function listar(loja, usuarioId) {
     );
     return linhas.map((l) => l.dados);
   } catch (e) {
-    console.warn('[SICEP+] listar', loja, e);
+    console.warn('[SIGEIA AVALIAÇÕES] listar', loja, e);
     return [];
   }
 }
@@ -190,7 +190,7 @@ export async function salvarCache(usuarioId, dados) {
     await pronto;
     return true;
   } catch (e) {
-    console.warn('[SICEP+] salvarCache', e);
+    console.warn('[SIGEIA AVALIAÇÕES] salvarCache', e);
     return false;
   }
 }
@@ -244,7 +244,7 @@ export async function limparCache(usuarioId) {
     await pronto;
     return true;
   } catch (e) {
-    console.warn('[SICEP+] limparCache', e);
+    console.warn('[SIGEIA AVALIAÇÕES] limparCache', e);
     return false;
   }
 }
@@ -261,7 +261,7 @@ export async function limparCacheDeOutros(usuarioIdAtual) {
     for (const id of ids) await limparCache(id);
     return true;
   } catch (e) {
-    console.warn('[SICEP+] limparCacheDeOutros', e);
+    console.warn('[SIGEIA AVALIAÇÕES] limparCacheDeOutros', e);
     return false;
   }
 }
@@ -281,7 +281,7 @@ export async function gravarSessao(sessao) {
     await fimDaTransacao(tx);
     return true;
   } catch (e) {
-    console.warn('[SICEP+] gravarSessao', e);
+    console.warn('[SIGEIA AVALIAÇÕES] gravarSessao', e);
     return false;
   }
 }
@@ -292,7 +292,7 @@ export async function lerSessao() {
   try {
     return (await aoRedor(idb.transaction(LOJA_SESSAO, 'readonly').objectStore(LOJA_SESSAO).get('atual'))) || null;
   } catch (e) {
-    console.warn('[SICEP+] lerSessao', e);
+    console.warn('[SIGEIA AVALIAÇÕES] lerSessao', e);
     return null;
   }
 }
@@ -306,7 +306,7 @@ export async function apagarSessao() {
     await fimDaTransacao(tx);
     return true;
   } catch (e) {
-    console.warn('[SICEP+] apagarSessao', e);
+    console.warn('[SIGEIA AVALIAÇÕES] apagarSessao', e);
     return false;
   }
 }
@@ -373,7 +373,7 @@ export async function filaEnfileirar(usuarioId, item) {
     await pronto;
     return gravado;
   } catch (e) {
-    console.warn('[SICEP+] filaEnfileirar', e);
+    console.warn('[SIGEIA AVALIAÇÕES] filaEnfileirar', e);
     return null;
   }
 }
@@ -420,7 +420,7 @@ export async function filaEnfileirarLote(usuarioId, avaliacaoId, itens) {
     await pronto;
     return gravados;
   } catch (e) {
-    console.warn('[SICEP+] filaEnfileirarLote', e);
+    console.warn('[SIGEIA AVALIAÇÕES] filaEnfileirarLote', e);
     return null;
   }
 }
@@ -479,7 +479,7 @@ export async function filaEnfileirarEdicao(usuarioId, item) {
     await pronto;
     return gravado;
   } catch (e) {
-    console.warn('[SICEP+] filaEnfileirarEdicao', e);
+    console.warn('[SIGEIA AVALIAÇÕES] filaEnfileirarEdicao', e);
     return null;
   }
 }
@@ -494,7 +494,7 @@ export async function filaListar(usuarioId) {
     );
     return linhas.sort((a, b) => a.seq - b.seq);
   } catch (e) {
-    console.warn('[SICEP+] filaListar', e);
+    console.warn('[SIGEIA AVALIAÇÕES] filaListar', e);
     return [];
   }
 }
@@ -519,7 +519,7 @@ export async function filaAtualizar(seq, mutar) {
     await pronto;
     return novo ? { ...novo, seq } : null;
   } catch (e) {
-    console.warn('[SICEP+] filaAtualizar', e);
+    console.warn('[SIGEIA AVALIAÇÕES] filaAtualizar', e);
     return null;
   }
 }
@@ -535,7 +535,7 @@ export async function filaRemover(seqs) {
     await fimDaTransacao(tx);
     return true;
   } catch (e) {
-    console.warn('[SICEP+] filaRemover', e);
+    console.warn('[SIGEIA AVALIAÇÕES] filaRemover', e);
     return false;
   }
 }
