@@ -1,0 +1,1112 @@
+From dd5a6d47a1472985de3d6b3f183840bcd7744965 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 11:28:57 -0300
+Subject: [PATCH] =?UTF-8?q?Renomeia=20SICEP+=20para=20SIGEIA=20AVALIA?=
+ =?UTF-8?q?=C3=87=C3=95ES=20na=20interface?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Muda só o que o usuário vê (títulos, login, menu, manifesto, mensagens,
+logs e PDF). Tabelas sicep_*, chaves de armazenamento, prefixo do QR,
+código de caderno padrão e tipo_layout continuam como estavam.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01M8HZn2yXZX7kJWbVsuSk5K
+---
+ assets/icons/icon.svg             |  2 +-
+ css/app.css                       |  2 +-
+ css/print.css                     |  2 +-
+ css/screens.css                   |  2 +-
+ index.html                        |  6 +++---
+ js/app.js                         | 16 +++++++-------
+ js/config.js                      |  4 ++--
+ js/desempenho.js                  |  2 +-
+ js/leitor/associacao.js           |  2 +-
+ js/leitor/camera.js               |  4 ++--
+ js/leitor/cartao-svg.js           |  4 ++--
+ js/leitor/exportar-cartao.js      |  4 ++--
+ js/leitor/geometria-v3.js         |  2 +-
+ js/leitor/geometria.js            |  2 +-
+ js/leitor/legado/cartao-svg-v4.js |  4 ++--
+ js/leitor/legado/geometria-v3.js  |  2 +-
+ js/leitor/legado/geometria-v4.js  |  2 +-
+ js/leitor/leitor.js               |  6 +++---
+ js/leitor/moldura.js              |  2 +-
+ js/leitor/omr.js                  |  6 +++---
+ js/leitor/opencv-loader.js        |  2 +-
+ js/leitor/qr-caderno.js           |  2 +-
+ js/nuvem.js                       | 24 ++++++++++-----------
+ js/offline/db.js                  | 36 +++++++++++++++----------------
+ js/offline/fila.js                |  6 +++---
+ js/screens/avaliacao-detalhe.js   |  2 +-
+ js/screens/avaliacoes.js          |  2 +-
+ js/screens/cartoes.js             |  4 ++--
+ js/screens/chamada.js             |  2 +-
+ js/screens/estado.js              |  6 +++---
+ js/screens/fila-painel.js         |  2 +-
+ js/screens/leitura.js             | 12 +++++------
+ js/screens/login.js               | 12 +++++------
+ js/screens/resultados.js          |  2 +-
+ js/store.js                       | 22 +++++++++----------
+ js/sw.js                          |  2 +-
+ js/ui.js                          |  2 +-
+ manifest.webmanifest              |  6 +++---
+ sw.js                             |  4 ++--
+ 39 files changed, 113 insertions(+), 113 deletions(-)
+
+diff --git a/assets/icons/icon.svg b/assets/icons/icon.svg
+index f100218..05ccc30 100644
+--- a/assets/icons/icon.svg
++++ b/assets/icons/icon.svg
+@@ -1,4 +1,4 @@
+-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="SICEP+">
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="SIGEIA AVALIAÇÕES">
+   <rect width="512" height="512" rx="96" fill="#F2B600"/>
+   <rect x="88" y="120" width="336" height="272" rx="28" fill="#FFFFFF" opacity="0.96"/>
+   <g fill="#1F2430">
+diff --git a/css/app.css b/css/app.css
+index 970d426..3157d68 100644
+--- a/css/app.css
++++ b/css/app.css
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Design system
++   SIGEIA AVALIAÇÕES · Design system
+    Paleta institucional amarela, interface educacional limpa.
+    ============================================================ */
+ 
+diff --git a/css/print.css b/css/print.css
+index b984733..a0fb683 100644
+--- a/css/print.css
++++ b/css/print.css
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Impressão dos cartões de respostas
++   SIGEIA AVALIAÇÕES · Impressão dos cartões de respostas
+    ------------------------------------------------------------
+    A folha é um SVG de 186 × 135 mm (geometria.js). Na impressão
+    ela sai em tamanho real, sem escala: margem da página = 0 e a
+diff --git a/css/screens.css b/css/screens.css
+index e9be27e..85a35e1 100644
+--- a/css/screens.css
++++ b/css/screens.css
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Estilos específicos de telas
++   SIGEIA AVALIAÇÕES · Estilos específicos de telas
+    ============================================================ */
+ 
+ /* ---------------- Avaliações ---------------- */
+diff --git a/index.html b/index.html
+index b327e0f..ac78aaa 100644
+--- a/index.html
++++ b/index.html
+@@ -4,8 +4,8 @@
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+   <meta name="theme-color" content="#F2B600" />
+-  <meta name="description" content="SICEP+ — Sistema Inteligente de Correção Escolar de Provas" />
+-  <title>SICEP+ · Correção de provas</title>
++  <meta name="description" content="SIGEIA AVALIAÇÕES — Correção escolar de provas por cartão de respostas" />
++  <title>SIGEIA AVALIAÇÕES · Correção de provas</title>
+   <link rel="manifest" href="manifest.webmanifest" />
+   <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml" />
+   <link rel="icon" href="assets/icons/icon-256.png" type="image/png" sizes="256x256" />
+@@ -22,7 +22,7 @@
+       <div class="boot-lines" aria-hidden="true">
+         <span></span><span></span><span></span>
+       </div>
+-      <p class="boot-txt">Carregando o SICEP+…</p>
++      <p class="boot-txt">Carregando o SIGEIA AVALIAÇÕES…</p>
+     </div>
+   </div>
+   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+diff --git a/js/app.js b/js/app.js
+index 63630b9..fcdb20f 100644
+--- a/js/app.js
++++ b/js/app.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Bootstrap, shell e roteador
++   SIGEIA AVALIAÇÕES · Bootstrap, shell e roteador
+ 
+    Dados 100% reais: sem sessão ou sem conexão a aplicação mostra o
+    motivo, nunca preenche a tela com dados fictícios.
+@@ -105,7 +105,7 @@ function shell(hash, conteudo, titulo) {
+     <div class="brand">
+       <span class="mark"><img src="assets/icons/icon.svg" alt="" /></span>
+       <span>
+-        <span class="brand-name">SICEP+</span>
++        <span class="brand-name">SIGEIA AVALIAÇÕES</span>
+         <span class="brand-sub">Correção de provas</span>
+       </span>
+     </div>
+@@ -115,7 +115,7 @@ function shell(hash, conteudo, titulo) {
+     </nav>
+     <div class="nav-foot">
+       <div class="strong" style="color:var(--ink-2)">${esc(usuario?.escola || '')}</div>
+-      <div>SICEP+ · ${esc(usuario?.nome || '')}</div>
++      <div>SIGEIA AVALIAÇÕES · ${esc(usuario?.nome || '')}</div>
+       <div class="nav-actions">
+         ${syncChip(estado)}
+         ${botaoRecarregar()}
+@@ -131,7 +131,7 @@ function shell(hash, conteudo, titulo) {
+       <div class="brand">
+         <span class="mark"><img src="assets/icons/icon.svg" alt="" /></span>
+         <span>
+-          <span class="brand-name">SICEP+</span>
++          <span class="brand-name">SIGEIA AVALIAÇÕES</span>
+           <span class="brand-sub">${esc(titulo || '')}</span>
+         </span>
+       </div>
+@@ -183,7 +183,7 @@ function render() {
+   if (typeof resultado?.destroy === 'function') limpezaAtual = resultado.destroy;
+ 
+   app.replaceChildren(shell(hash, conteudo, alvo.rota.titulo));
+-  document.title = 'SICEP+ · ' + (alvo.rota.titulo || 'Início');
++  document.title = 'SIGEIA AVALIAÇÕES · ' + (alvo.rota.titulo || 'Início');
+   window.scrollTo({ top: 0 });
+ }
+ 
+@@ -227,7 +227,7 @@ function montarLogin() {
+       montarApp();
+     },
+   }));
+-  document.title = 'SICEP+ · Entrar';
++  document.title = 'SIGEIA AVALIAÇÕES · Entrar';
+ }
+ 
+ function removerListener() {
+@@ -240,7 +240,7 @@ if (boot.estado === 'sem-sessao') {
+   montarLogin();
+ } else if (boot.estado !== 'pronto') {
+   document.getElementById('app').replaceChildren(estadoScreen(boot.estado, boot.erro));
+-  document.title = 'SICEP+';
++  document.title = 'SIGEIA AVALIAÇÕES';
+ } else {
+   montarApp();
+ }
+@@ -248,6 +248,6 @@ if (boot.estado === 'sem-sessao') {
+ /* Service worker (PWA) — apenas fora do ambiente local */
+ if ('serviceWorker' in navigator && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) {
+   window.addEventListener('load', () => {
+-    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('[SICEP+] SW', e));
++    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('[SIGEIA AVALIAÇÕES] SW', e));
+   });
+ }
+diff --git a/js/config.js b/js/config.js
+index 437fe4a..92733a6 100644
+--- a/js/config.js
++++ b/js/config.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Configuração de integração
++   SIGEIA AVALIAÇÕES · Configuração de integração
+    ------------------------------------------------------------
+    Este arquivo fica SOMENTE no código-fonte. Nada aqui é exibido
+    na interface: o usuário vê apenas "Sincronização na nuvem".
+@@ -8,7 +8,7 @@
+    NUNCA coloque service_role no cliente.
+ 
+    A sessão do usuário continua vindo do login existente do
+-   SIGEIA+/SIDED+ (sessionStorage ded_user / prof_data). O SICEP+
++   SIGEIA+/SIDED+ (sessionStorage ded_user / prof_data). O SIGEIA AVALIAÇÕES
+    não tem tela de login própria.
+    ============================================================ */
+ 
+diff --git a/js/desempenho.js b/js/desempenho.js
+index b394cb0..4f94e44 100644
+--- a/js/desempenho.js
++++ b/js/desempenho.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Etapa 4C — Desempenho por habilidade
++   SIGEIA AVALIAÇÕES · Etapa 4C — Desempenho por habilidade
+ 
+    Cálculo puro (sem DOM, sem rede) a partir do que já está em
+    memória/cache: avaliações com questoes.habilidade_bncc,
+diff --git a/js/leitor/associacao.js b/js/leitor/associacao.js
+index bd7ba8e..8a45dcd 100644
+--- a/js/leitor/associacao.js
++++ b/js/leitor/associacao.js
+@@ -1,4 +1,4 @@
+-/* SICEP+ · Associação aluno ↔ caderno (QR) ↔ avaliação.
++/* SIGEIA AVALIAÇÕES · Associação aluno ↔ caderno (QR) ↔ avaliação.
+  * Lógica pura (sem DOM) para poder ser testada fora do navegador.
+  */
+ 
+diff --git a/js/leitor/camera.js b/js/leitor/camera.js
+index c0bc7d1..06dbcce 100644
+--- a/js/leitor/camera.js
++++ b/js/leitor/camera.js
+@@ -1,4 +1,4 @@
+-/* SICEP+ · Seleção da câmera traseira PRINCIPAL (1x) e resolução máxima.
++/* SIGEIA AVALIAÇÕES · Seleção da câmera traseira PRINCIPAL (1x) e resolução máxima.
+  *
+  * Regras (mudança 1):
+  *  - usa somente a câmera traseira principal; nunca ultrawide (0,5x), tele, macro, profundidade ou frontal;
+@@ -71,7 +71,7 @@ export function escolherPrincipal(dispositivos) {
+   if (lista.every((d) => !String(d.label || '').trim())) {
+     throw new CameraErro('sem-nomes',
+       'Este navegador não informa o nome das câmeras, então não consigo garantir a lente principal (1x). ' +
+-      'Use "Enviar foto" ou abra o SICEP+ no Chrome (Android) ou no Safari (iPhone).');
++      'Use "Enviar foto" ou abra o SIGEIA AVALIAÇÕES no Chrome (Android) ou no Safari (iPhone).');
+   }
+ 
+   const analisadas = lista.map((d) => ({ d, c: classificarRotulo(d.label) }));
+diff --git a/js/leitor/cartao-svg.js b/js/leitor/cartao-svg.js
+index 996d71a..8013c06 100644
+--- a/js/leitor/cartao-svg.js
++++ b/js/leitor/cartao-svg.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Desenho do cartão de respostas (SVG em milímetros)
++   SIGEIA AVALIAÇÕES · Desenho do cartão de respostas (SVG em milímetros)
+    ------------------------------------------------------------
+    Módulo puro (sem DOM): recebe os dados e devolve o texto SVG.
+    Todas as posições de questões/bolinhas vêm de geometria.js — a MESMA
+@@ -9,7 +9,7 @@
+    Layout v5 (compacto, paisagem): faixa lateral com a numeração, bolinhas
+    vazias alinhadas, A B C D no cabeçalho de cada coluna, linhas pontilhadas
+    entre as questões e QR Code no rodapé.
+-   O cartão não exibe a marca SICEP+: só escola, aluno, turma, avaliação
++   O cartão não exibe a marca SIGEIA AVALIAÇÕES: só escola, aluno, turma, avaliação
+    e o caderno. Os 4 quadrados pretos são obrigatórios.
+ 
+    Modos de exportação (opções de montarCartaoSvg, a grade NUNCA muda):
+diff --git a/js/leitor/exportar-cartao.js b/js/leitor/exportar-cartao.js
+index a8f43e5..b938a14 100644
+--- a/js/leitor/exportar-cartao.js
++++ b/js/leitor/exportar-cartao.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Exportação do cartão (e do QR) em PDF ou PNG
++   SIGEIA AVALIAÇÕES · Exportação do cartão (e do QR) em PDF ou PNG
+    ------------------------------------------------------------
+    Recebe o SVG que o cartao-svg.js já desenhou (a mesma fonte da impressão e da
+    leitura) e o converte, sem biblioteca externa:
+@@ -313,7 +313,7 @@ export function svgParaPdfTexto(svg, { larguraMm, alturaMm, pagina = 'exata', ti
+   add(`<< /Length ${conteudo.length} >>\nstream\n${conteudo}endstream`);
+   add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+   add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+-  const info = add(`<< /Title (${textoPdf(titulo)}) /Producer (SICEP+) >>`);
++  const info = add(`<< /Title (${textoPdf(titulo)}) /Producer (SIGEIA AVALIAÇÕES) >>`);
+ 
+   let pdf = '%PDF-1.4\n%\u00e2\u00e3\u00cf\u00d3\n';
+   const offs = [];
+diff --git a/js/leitor/geometria-v3.js b/js/leitor/geometria-v3.js
+index 749142e..136f269 100644
+--- a/js/leitor/geometria-v3.js
++++ b/js/leitor/geometria-v3.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Geometria v3 do cartão de respostas (leitura de cartões antigos)
++   SIGEIA AVALIAÇÕES · Geometria v3 do cartão de respostas (leitura de cartões antigos)
+    ------------------------------------------------------------
+    Cópia fiel do layout v3, que era o usado na impressão antes da v4.
+    A leitura usa ESTA geometria só quando a folha impressa é comprovadamente
+diff --git a/js/leitor/geometria.js b/js/leitor/geometria.js
+index 00bece4..d1e863f 100644
+--- a/js/leitor/geometria.js
++++ b/js/leitor/geometria.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Geometria do cartão de respostas (v5 · compacto)
++   SIGEIA AVALIAÇÕES · Geometria do cartão de respostas (v5 · compacto)
+    ------------------------------------------------------------
+    Fonte única de verdade para IMPRESSÃO (cartao-svg.js) e LEITURA
+    (leitor.js). Tudo em milímetros, na folha de 186 × 135 mm (paisagem).
+diff --git a/js/leitor/legado/cartao-svg-v4.js b/js/leitor/legado/cartao-svg-v4.js
+index baa7b90..7aa276f 100644
+--- a/js/leitor/legado/cartao-svg-v4.js
++++ b/js/leitor/legado/cartao-svg-v4.js
+@@ -1,12 +1,12 @@
+ /* ============================================================
+-   SICEP+ · Desenho do cartão de respostas (SVG em milímetros)
++   SIGEIA AVALIAÇÕES · Desenho do cartão de respostas (SVG em milímetros)
+    ------------------------------------------------------------
+    Módulo puro (sem DOM): recebe os dados e devolve o texto SVG.
+    Todas as posições de questões/bolinhas vêm de geometria.js — a MESMA
+    fonte usada pelo leitor (leitor.js). O cabeçalho e o rodapé são apenas
+    desenho: não deslocam a grade.
+ 
+-   O cartão não exibe a marca SICEP+: só escola, aluno, turma, avaliação
++   O cartão não exibe a marca SIGEIA AVALIAÇÕES: só escola, aluno, turma, avaliação
+    e o caderno. Os 4 quadrados pretos e o QR Code são obrigatórios.
+    ============================================================ */
+ 
+diff --git a/js/leitor/legado/geometria-v3.js b/js/leitor/legado/geometria-v3.js
+index 3124897..7362a1c 100644
+--- a/js/leitor/legado/geometria-v3.js
++++ b/js/leitor/legado/geometria-v3.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Geometria v3 do cartão de respostas (leitura de cartões antigos)
++   SIGEIA AVALIAÇÕES · Geometria v3 do cartão de respostas (leitura de cartões antigos)
+    ------------------------------------------------------------
+    Cópia fiel do layout v3, que era o usado na impressão antes da v4.
+    A leitura usa ESTA geometria só quando a folha impressa é comprovadamente
+diff --git a/js/leitor/legado/geometria-v4.js b/js/leitor/legado/geometria-v4.js
+index cad812e..3304ed3 100644
+--- a/js/leitor/legado/geometria-v4.js
++++ b/js/leitor/legado/geometria-v4.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Geometria do cartão de respostas
++   SIGEIA AVALIAÇÕES · Geometria do cartão de respostas
+    ------------------------------------------------------------
+    Fonte única de verdade para IMPRESSÃO (cartao-svg.js) e LEITURA
+    (leitor.js). Tudo em milímetros, na folha de 186 × 273 mm.
+diff --git a/js/leitor/leitor.js b/js/leitor/leitor.js
+index caf957b..dfd80fd 100644
+--- a/js/leitor/leitor.js
++++ b/js/leitor/leitor.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Leitor óptico (OpenCV.js)
++   SIGEIA AVALIAÇÕES · Leitor óptico (OpenCV.js)
+    ------------------------------------------------------------
+    Este módulo não toca no DOM: recebe `cv` e imagens RGBA
+    ({ data, width, height }) e devolve dados puros. Assim roda
+@@ -688,7 +688,7 @@ export function lerQRNaFolha(cv, rgbaAlinhada) {
+     }
+     return null;
+   } catch (e) {
+-    console.warn('[SICEP+] QR na folha:', e);
++    console.warn('[SIGEIA AVALIAÇÕES] QR na folha:', e);
+     return null;
+   } finally {
+     limpar();
+@@ -747,7 +747,7 @@ export async function lerQR(cv, imagem, fallbackCanvas = null, opcoes = {}) {
+       }
+     }
+   } catch (e) {
+-    console.warn('[SICEP+] QR via OpenCV:', e);
++    console.warn('[SIGEIA AVALIAÇÕES] QR via OpenCV:', e);
+   } finally {
+     limpar();
+   }
+diff --git a/js/leitor/moldura.js b/js/leitor/moldura.js
+index 6554081..313e265 100644
+--- a/js/leitor/moldura.js
++++ b/js/leitor/moldura.js
+@@ -1,4 +1,4 @@
+-/* SICEP+ · Geometria da moldura de enquadramento da câmera.
++/* SIGEIA AVALIAÇÕES · Geometria da moldura de enquadramento da câmera.
+  *
+  * A prévia usa object-fit: contain: quando a câmera entrega um quadro com proporção
+  * diferente da tela, a imagem ocupa só uma faixa (com preto em cima e embaixo). A moldura
+diff --git a/js/leitor/omr.js b/js/leitor/omr.js
+index 67bd463..b375b00 100644
+--- a/js/leitor/omr.js
++++ b/js/leitor/omr.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · OMR — pipeline completo de leitura do cartão
++   SIGEIA AVALIAÇÕES · OMR — pipeline completo de leitura do cartão
+    ------------------------------------------------------------
+    Une as etapas do leitor.js (OpenCV) em uma chamada só:
+      foto → 4 marcadores → perspectiva → QR → conferência da grade
+@@ -69,7 +69,7 @@ const MOTIVOS = {
+       : 'Não achei os 4 quadrados pretos dos cantos. Mostre o cartão inteiro, com boa luz e sem sombra.'),
+   cartao_cortado: () => 'Os quadrados dos cantos estão na beirada da foto: o cartão foi cortado. Afaste a câmera e enquadre a folha inteira, com uma margem em volta.',
+   alinhamento: () => 'Os quadrados dos cantos não bateram com o cartão. Fotografe de frente, sem dobras e com os 4 quadrados inteiros dentro da foto — se algum canto estiver cortado, o cartão não é lido.',
+-  versao_diferente: (c) => `Este cartão foi impresso com o layout v${c.geometria} do cartão-resposta e o SICEP+ atual usa o v${GEOMETRIA_VERSAO}. Gere e imprima um cartão novo desta avaliação (aba Cartões).`,
++  versao_diferente: (c) => `Este cartão foi impresso com o layout v${c.geometria} do cartão-resposta e o SIGEIA AVALIAÇÕES atual usa o v${GEOMETRIA_VERSAO}. Gere e imprima um cartão novo desta avaliação (aba Cartões).`,
+   cartao_outra_versao: (c) => `As bolinhas deste cartão não batem com a avaliação: o cartão impresso usa ${c.grade.cols} coluna(s) × ${c.grade.rows} linha(s) e esta avaliação usa ${c.atual?.colunas} × ${c.atual?.linhas}. Ele foi impresso antes de a avaliação ser alterada (ou em outra versão do cartão). Gere e imprima um cartão novo na aba Cartões.`,
+   questoes_diferentes: (c) => `O QR deste cartão diz ${c.questoes} questões, mas a avaliação tem ${c.avaliacao}. O cartão é de outra versão da avaliação — imprima um cartão novo.`,
+   alternativas_diferentes: (c) => `O QR deste cartão diz ${c.alternativas} alternativas, mas a avaliação tem ${c.avaliacaoAlts}. Imprima um cartão novo desta avaliação.`,
+@@ -218,7 +218,7 @@ export async function processarCartao(cv, imagem, o = {}) {
+       ms: Date.now() - t0,
+     };
+   } catch (e) {
+-    console.error('[SICEP+] processarCartao', e);
++    console.error('[SIGEIA AVALIAÇÕES] processarCartao', e);
+     return falha('erro', { detalhe: e?.message || String(e) });
+   } finally {
+     al.cinza.delete();
+diff --git a/js/leitor/opencv-loader.js b/js/leitor/opencv-loader.js
+index 31bf5f1..cf2f5a7 100644
+--- a/js/leitor/opencv-loader.js
++++ b/js/leitor/opencv-loader.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Carregador do OpenCV.js
++   SIGEIA AVALIAÇÕES · Carregador do OpenCV.js
+    ------------------------------------------------------------
+    O arquivo (js/lib/opencv.js, ~13 MB) fica no próprio projeto:
+    o app funciona offline e o service worker o guarda em cache
+diff --git a/js/leitor/qr-caderno.js b/js/leitor/qr-caderno.js
+index 03568a5..b2232ac 100644
+--- a/js/leitor/qr-caderno.js
++++ b/js/leitor/qr-caderno.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Conteúdo do QR Code do cartão
++   SIGEIA AVALIAÇÕES · Conteúdo do QR Code do cartão
+    ------------------------------------------------------------
+    O QR identifica o CADERNO (código da avaliação), a versão do caderno,
+    a versão da geometria do cartão e o tamanho da grade (questões ×
+diff --git a/js/nuvem.js b/js/nuvem.js
+index e6a2a55..ee0901a 100644
+--- a/js/nuvem.js
++++ b/js/nuvem.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Cliente Supabase (REST/PostgREST)
++   SIGEIA AVALIAÇÕES · Cliente Supabase (REST/PostgREST)
+    ------------------------------------------------------------
+    Mesmo padrão usado pelo SIDED+ (api(path, options)).
+ 
+@@ -40,8 +40,8 @@ async function api(path, opcoes = {}) {
+ 
+ /* ---------------- Autenticação (mesmas credenciais do SIGEIA+/SIDED+) ----------------
+    O SIDED+ autentica pela função buscar_usuario_login(login, senha), que aceita
+-   login, e-mail ou CPF. O SICEP+ usa exatamente a mesma função e a mesma tabela
+-   users — não existe cadastro nem senha própria do SICEP+.
++   login, e-mail ou CPF. O SIGEIA AVALIAÇÕES usa exatamente a mesma função e a mesma tabela
++   users — não existe cadastro nem senha própria do SIGEIA AVALIAÇÕES.
+    ------------------------------------------------------------------------------ */
+ 
+ export async function login(identificador, senha) {
+@@ -61,7 +61,7 @@ export async function login(identificador, senha) {
+ 
+ /**
+  * O SIDED+ guarda o professor em sessionStorage.prof_data.
+- * O SICEP+ resolve o mesmo vínculo a partir do usuário autenticado:
++ * O SIGEIA AVALIAÇÕES resolve o mesmo vínculo a partir do usuário autenticado:
+  * users.login / users.cpf / users.nome -> professores.id_login / cpf / nome.
+  */
+ export async function resolverProfessor(usuario) {
+@@ -82,7 +82,7 @@ export async function resolverProfessor(usuario) {
+       if (linhas.length) return linhas[0];
+     } catch (e) {
+       // Coluna ausente em algum banco antigo: segue para a próxima tentativa.
+-      console.warn('[SICEP+] vínculo com professores:', e.message);
++      console.warn('[SIGEIA AVALIAÇÕES] vínculo com professores:', e.message);
+     }
+   }
+   return null;
+@@ -346,7 +346,7 @@ export async function carregarHabilidades(turmaDisciplinaIds) {
+     });
+   } catch (e) {
+     // Sem parâmetro_divisoes: o nome da divisão ainda pode dizer o trimestre.
+-    console.warn('[SICEP+] parametro_divisoes indisponível:', e.message);
++    console.warn('[SIGEIA AVALIAÇÕES] parametro_divisoes indisponível:', e.message);
+   }
+ 
+   try {
+@@ -358,7 +358,7 @@ export async function carregarHabilidades(turmaDisciplinaIds) {
+       if (achado) trimestrePorDivisao.set(d.id, Number(achado[1]));
+     });
+   } catch (e) {
+-    console.warn('[SICEP+] divisoes indisponível:', e.message);
++    console.warn('[SIGEIA AVALIAÇÕES] divisoes indisponível:', e.message);
+   }
+ 
+   const habilidades = linhas
+@@ -420,7 +420,7 @@ async function inserirIdempotente(tabela, linhas) {
+     } catch (e) {
+       if (!recusouIdDoCliente(e)) throw e;
+       idsDoCliente = false;
+-      console.warn('[SICEP+] O banco não aceita id do cliente em', tabela, '— usando id do servidor.');
++      console.warn('[SIGEIA AVALIAÇÕES] O banco não aceita id do cliente em', tabela, '— usando id do servidor.');
+     }
+   }
+   return await api(tabela, {
+@@ -470,7 +470,7 @@ async function temColunaHabilidadeBncc() {
+     suportaHabilidadeBncc = true;
+   } catch (e) {
+     suportaHabilidadeBncc = false;
+-    console.warn('[SICEP+] coluna habilidade_bncc indisponível:', e.message);
++    console.warn('[SIGEIA AVALIAÇÕES] coluna habilidade_bncc indisponível:', e.message);
+   }
+   return suportaHabilidadeBncc;
+ }
+@@ -955,12 +955,12 @@ export async function registrarScan({ resultado_id, imagem_url, respostas_detect
+ 
+ /**
+  * A avaliação do SIDED+ pertence a UMA turma (avaliacoes.turma_id).
+- * Um instrumento do SICEP+ pode valer para várias turmas, portanto o vínculo
++ * Um instrumento do SIGEIA AVALIAÇÕES pode valer para várias turmas, portanto o vínculo
+  * é por turma — nunca um id único no instrumento (era isso que fazia o envio
+  * de uma turma cair na avaliação/turma da primeira e criava registros repetidos).
+  */
+ 
+-/** Id guardado no SICEP+ só vale se for mesmo da turma que está sendo enviada. */
++/** Id guardado no SIGEIA AVALIAÇÕES só vale se for mesmo da turma que está sendo enviada. */
+ async function sidedDaTurma(sidedId, turmaId) {
+   if (!sidedId) return null;
+   try {
+@@ -1019,7 +1019,7 @@ export async function enviarNotasSided({ avaliacaoSicep, turma, turmaDisciplinaI
+         turma_disciplina_id: turmaDisciplinaId || null,
+         disciplina: avaliacaoSicep.disciplina || null,
+         data: avaliacaoSicep.data_aplicacao || null,
+-        observacoes: 'Registrada pelo SICEP+',
++        observacoes: 'Registrada pelo SIGEIA AVALIAÇÕES',
+       }),
+     }) || [];
+     if (!nova?.id) throw new Error('O SIDED+ não devolveu a avaliação criada.');
+diff --git a/js/offline/db.js b/js/offline/db.js
+index df0c7bc..f332b7b 100644
+--- a/js/offline/db.js
++++ b/js/offline/db.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Armazenamento local (IndexedDB) — Etapa 6B
++   SIGEIA AVALIAÇÕES · Armazenamento local (IndexedDB) — Etapa 6B
+ 
+    Guarda uma CÓPIA dos dados que vieram do Supabase e a sessão
+    autenticada, para o app reabrir sem internet.
+@@ -76,8 +76,8 @@ export function abrir() {
+       idb.onversionchange = () => { idb.close(); abertura = null; };
+       ok(idb);
+     };
+-    req.onerror = () => { console.warn('[SICEP+] IndexedDB indisponível:', req.error); ok(null); };
+-    req.onblocked = () => console.warn('[SICEP+] IndexedDB bloqueado por outra aba.');
++    req.onerror = () => { console.warn('[SIGEIA AVALIAÇÕES] IndexedDB indisponível:', req.error); ok(null); };
++    req.onblocked = () => console.warn('[SIGEIA AVALIAÇÕES] IndexedDB bloqueado por outra aba.');
+   }).then((idb) => { if (!idb) abertura = null; return idb; });
+ 
+   return abertura;
+@@ -97,7 +97,7 @@ export async function gravar(loja, usuarioId, id, dados) {
+     await fimDaTransacao(tx);
+     return true;
+   } catch (e) {
+-    console.warn('[SICEP+] gravar', loja, e);
++    console.warn('[SIGEIA AVALIAÇÕES] gravar', loja, e);
+     return false;
+   }
+ }
+@@ -110,7 +110,7 @@ export async function ler(loja, usuarioId, id) {
+     const linha = await aoRedor(idb.transaction(loja, 'readonly').objectStore(loja).get(chave(usuarioId, id)));
+     return linha && linha.usuario_id === usuarioId ? linha.dados : null;
+   } catch (e) {
+-    console.warn('[SICEP+] ler', loja, e);
++    console.warn('[SIGEIA AVALIAÇÕES] ler', loja, e);
+     return null;
+   }
+ }
+@@ -125,7 +125,7 @@ export async function listar(loja, usuarioId) {
+     );
+     return linhas.map((l) => l.dados);
+   } catch (e) {
+-    console.warn('[SICEP+] listar', loja, e);
++    console.warn('[SIGEIA AVALIAÇÕES] listar', loja, e);
+     return [];
+   }
+ }
+@@ -190,7 +190,7 @@ export async function salvarCache(usuarioId, dados) {
+     await pronto;
+     return true;
+   } catch (e) {
+-    console.warn('[SICEP+] salvarCache', e);
++    console.warn('[SIGEIA AVALIAÇÕES] salvarCache', e);
+     return false;
+   }
+ }
+@@ -244,7 +244,7 @@ export async function limparCache(usuarioId) {
+     await pronto;
+     return true;
+   } catch (e) {
+-    console.warn('[SICEP+] limparCache', e);
++    console.warn('[SIGEIA AVALIAÇÕES] limparCache', e);
+     return false;
+   }
+ }
+@@ -261,7 +261,7 @@ export async function limparCacheDeOutros(usuarioIdAtual) {
+     for (const id of ids) await limparCache(id);
+     return true;
+   } catch (e) {
+-    console.warn('[SICEP+] limparCacheDeOutros', e);
++    console.warn('[SIGEIA AVALIAÇÕES] limparCacheDeOutros', e);
+     return false;
+   }
+ }
+@@ -281,7 +281,7 @@ export async function gravarSessao(sessao) {
+     await fimDaTransacao(tx);
+     return true;
+   } catch (e) {
+-    console.warn('[SICEP+] gravarSessao', e);
++    console.warn('[SIGEIA AVALIAÇÕES] gravarSessao', e);
+     return false;
+   }
+ }
+@@ -292,7 +292,7 @@ export async function lerSessao() {
+   try {
+     return (await aoRedor(idb.transaction(LOJA_SESSAO, 'readonly').objectStore(LOJA_SESSAO).get('atual'))) || null;
+   } catch (e) {
+-    console.warn('[SICEP+] lerSessao', e);
++    console.warn('[SIGEIA AVALIAÇÕES] lerSessao', e);
+     return null;
+   }
+ }
+@@ -306,7 +306,7 @@ export async function apagarSessao() {
+     await fimDaTransacao(tx);
+     return true;
+   } catch (e) {
+-    console.warn('[SICEP+] apagarSessao', e);
++    console.warn('[SIGEIA AVALIAÇÕES] apagarSessao', e);
+     return false;
+   }
+ }
+@@ -373,7 +373,7 @@ export async function filaEnfileirar(usuarioId, item) {
+     await pronto;
+     return gravado;
+   } catch (e) {
+-    console.warn('[SICEP+] filaEnfileirar', e);
++    console.warn('[SIGEIA AVALIAÇÕES] filaEnfileirar', e);
+     return null;
+   }
+ }
+@@ -420,7 +420,7 @@ export async function filaEnfileirarLote(usuarioId, avaliacaoId, itens) {
+     await pronto;
+     return gravados;
+   } catch (e) {
+-    console.warn('[SICEP+] filaEnfileirarLote', e);
++    console.warn('[SIGEIA AVALIAÇÕES] filaEnfileirarLote', e);
+     return null;
+   }
+ }
+@@ -479,7 +479,7 @@ export async function filaEnfileirarEdicao(usuarioId, item) {
+     await pronto;
+     return gravado;
+   } catch (e) {
+-    console.warn('[SICEP+] filaEnfileirarEdicao', e);
++    console.warn('[SIGEIA AVALIAÇÕES] filaEnfileirarEdicao', e);
+     return null;
+   }
+ }
+@@ -494,7 +494,7 @@ export async function filaListar(usuarioId) {
+     );
+     return linhas.sort((a, b) => a.seq - b.seq);
+   } catch (e) {
+-    console.warn('[SICEP+] filaListar', e);
++    console.warn('[SIGEIA AVALIAÇÕES] filaListar', e);
+     return [];
+   }
+ }
+@@ -519,7 +519,7 @@ export async function filaAtualizar(seq, mutar) {
+     await pronto;
+     return novo ? { ...novo, seq } : null;
+   } catch (e) {
+-    console.warn('[SICEP+] filaAtualizar', e);
++    console.warn('[SIGEIA AVALIAÇÕES] filaAtualizar', e);
+     return null;
+   }
+ }
+@@ -535,7 +535,7 @@ export async function filaRemover(seqs) {
+     await fimDaTransacao(tx);
+     return true;
+   } catch (e) {
+-    console.warn('[SICEP+] filaRemover', e);
++    console.warn('[SIGEIA AVALIAÇÕES] filaRemover', e);
+     return false;
+   }
+ }
+diff --git a/js/offline/fila.js b/js/offline/fila.js
+index 04005f8..6e18383 100644
+--- a/js/offline/fila.js
++++ b/js/offline/fila.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Fila de sincronização offline — Etapa 6D
++   SIGEIA AVALIAÇÕES · Fila de sincronização offline — Etapa 6D
+ 
+    Resultados gravados sem internet (ou que falharam por rede) ficam
+    na fila IndexedDB e são enviados ao Supabase quando possível.
+@@ -337,7 +337,7 @@ async function rodarFila(usuarioId, { aoSincronizar }) {
+       });
+       if (final) {
+         resumo.sincronizados += 1;
+-        if (aoSincronizar) { try { await aoSincronizar(final, linha); } catch (e) { console.warn('[SICEP+] aoSincronizar', e); } }
++        if (aoSincronizar) { try { await aoSincronizar(final, linha); } catch (e) { console.warn('[SIGEIA AVALIAÇÕES] aoSincronizar', e); } }
+       }
+     } catch (e) {
+       // Divergência entre a edição local e a nuvem: guarda as duas versões e para este alvo.
+@@ -367,7 +367,7 @@ async function rodarFila(usuarioId, { aoSincronizar }) {
+       await banco.filaAtualizar(emEnvio.seq, (x) => (x.status === STATUS.SINCRONIZANDO
+         ? { ...x, status: STATUS.ERRO, erro: mensagemDoErro(e), codigo_erro: e?.codigo || null, permanente: !transitoria, scan_ok: emEnvio.scan_ok }
+         : null));
+-      console.warn('[SICEP+] sincronizar item', emEnvio.tipo, emEnvio.resultado_id || emEnvio.avaliacao_id, e?.message || e);
++      console.warn('[SIGEIA AVALIAÇÕES] sincronizar item', emEnvio.tipo, emEnvio.resultado_id || emEnvio.avaliacao_id, e?.message || e);
+       if (transitoria) { resumo.parou = 'rede'; avisarMudanca(); break; } // rede caiu: não adianta seguir; a ordem se mantém
+       marcarBloqueio(emEnvio);
+     }
+diff --git a/js/screens/avaliacao-detalhe.js b/js/screens/avaliacao-detalhe.js
+index 99129c9..d5a1709 100644
+--- a/js/screens/avaliacao-detalhe.js
++++ b/js/screens/avaliacao-detalhe.js
+@@ -249,7 +249,7 @@ export default function avaliacaoDetalhe(params) {
+           ${statusAvaliacao(av.status)}
+           ${syncAvaliacaoBadge(av.sync)}
+           ${prazoChip(prazo)}
+-          ${av.lancar_sided ? '<span class="badge y">Integra SIDED+</span>' : '<span class="badge">Somente SICEP+</span>'}
++          ${av.lancar_sided ? '<span class="badge y">Integra SIDED+</span>' : '<span class="badge">Somente SIGEIA AVALIAÇÕES</span>'}
+         </div>
+       </div>
+ 
+diff --git a/js/screens/avaliacoes.js b/js/screens/avaliacoes.js
+index 6d62ab4..ed45578 100644
+--- a/js/screens/avaliacoes.js
++++ b/js/screens/avaliacoes.js
+@@ -39,7 +39,7 @@ export default function avaliacoes() {
+         <div class="row wrap" style="gap:6px">
+           ${syncAvaliacaoBadge(av.sync)}
+           ${prazoChip(store.prazoDe(av))}
+-          ${av.lancar_sided ? '<span class="badge y">SIDED+</span>' : '<span class="badge">Somente SICEP+</span>'}
++          ${av.lancar_sided ? '<span class="badge y">SIDED+</span>' : '<span class="badge">Somente SIGEIA AVALIAÇÕES</span>'}
+         </div>
+ 
+         <div class="av-foot">
+diff --git a/js/screens/cartoes.js b/js/screens/cartoes.js
+index 9016e25..e4b9f2d 100644
+--- a/js/screens/cartoes.js
++++ b/js/screens/cartoes.js
+@@ -13,7 +13,7 @@ function qrObjeto(texto) {
+     qr.make();
+     return qr;
+   } catch (e) {
+-    console.warn('[SICEP+] QR Code:', e);
++    console.warn('[SIGEIA AVALIAÇÕES] QR Code:', e);
+     return null;
+   }
+ }
+@@ -108,7 +108,7 @@ export default function cartoes(params) {
+       baixarBlob(blob, `${nome}.${formato}`);
+       toast(`${formato.toUpperCase()} gerado.`, 'ok');
+     } catch (e) {
+-      console.warn('[SICEP+] exportar:', e);
++      console.warn('[SIGEIA AVALIAÇÕES] exportar:', e);
+       toast(e?.message || 'Não foi possível gerar o arquivo.', 'err');
+     } finally {
+       exportando = false;
+diff --git a/js/screens/chamada.js b/js/screens/chamada.js
+index f40f36b..fcb7209 100644
+--- a/js/screens/chamada.js
++++ b/js/screens/chamada.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Chamada da avaliação (presente / falta / pendente)
++   SIGEIA AVALIAÇÕES · Chamada da avaliação (presente / falta / pendente)
+ 
+    Tela própria, aberta pelo botão "Chamada" em Avaliações.
+    - Uma turma por vez: avaliação com várias turmas pede para escolher a turma.
+diff --git a/js/screens/estado.js b/js/screens/estado.js
+index 7a9738d..c665677 100644
+--- a/js/screens/estado.js
++++ b/js/screens/estado.js
+@@ -5,7 +5,7 @@ const CONTEUDO = {
+     icone: 'alert',
+     titulo: 'Integração não configurada',
+     texto: 'Faltam a URL e a chave publishable do projeto Supabase em <span class="mono">js/config.js</span>. '
+-      + 'O SICEP+ não exibe dados até a conexão existir.',
++      + 'O SIGEIA AVALIAÇÕES não exibe dados até a conexão existir.',
+     acao: null,
+   },
+   'sem-sessao': {
+@@ -32,7 +32,7 @@ export default function estadoScreen(estado, detalhe) {
+         <div class="login-brand">
+           <span class="mark lg"><img src="assets/icons/icon.svg" alt="" /></span>
+           <div>
+-            <h1>SICEP+</h1>
++            <h1>SIGEIA AVALIAÇÕES</h1>
+             <p class="small muted">Correção escolar de provas por cartão de respostas</p>
+           </div>
+         </div>
+@@ -54,7 +54,7 @@ export default function estadoScreen(estado, detalhe) {
+           ${cfg.acao?.retry ? `<button class="btn btn-primary btn-block" type="button" data-retry>${cfg.acao.rotulo}</button>` : ''}
+         </div>
+ 
+-        <p class="xs muted center" style="margin-top:14px">SICEP+ · integrado ao SIDED+</p>
++        <p class="xs muted center" style="margin-top:14px">SIGEIA AVALIAÇÕES · integrado ao SIDED+</p>
+       </div>
+     </div>
+   `);
+diff --git a/js/screens/fila-painel.js b/js/screens/fila-painel.js
+index 23e11c3..fb2613c 100644
+--- a/js/screens/fila-painel.js
++++ b/js/screens/fila-painel.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Painel da fila de sincronização (Etapa 6D)
++   SIGEIA AVALIAÇÕES · Painel da fila de sincronização (Etapa 6D)
+ 
+    Mostra os resultados que ainda não chegaram à nuvem, o status de cada um
+    (pendente, enviando, erro), e permite tentar de novo ou descartar um item
+diff --git a/js/screens/leitura.js b/js/screens/leitura.js
+index bf2a6db..b807a64 100644
+--- a/js/screens/leitura.js
++++ b/js/screens/leitura.js
+@@ -39,7 +39,7 @@ const ROTULO_ESTADO = {
+  * da tela (o que o professor deve fazer agora).
+  */
+ const DICA_BLOQUEIO = {
+-  cartao_outra_versao: 'Imprima um cartão novo na aba Cartões — o cartão antigo não pode ser lido por esta versão do SICEP+.',
++  cartao_outra_versao: 'Imprima um cartão novo na aba Cartões — o cartão antigo não pode ser lido por esta versão do SIGEIA AVALIAÇÕES.',
+   versao_diferente: 'Os cartões já impressos continuam válidos para a conferência manual, mas precisam ser reimpressos para a leitura automática.',
+   cartao_cortado: 'Dica: enquadre a folha inteira, deixando uma margem branca em volta dos 4 quadrados pretos.',
+ };
+@@ -200,7 +200,7 @@ export default function leitura(params) {
+       stream = r.stream;
+       ov.camInfo = r.info;
+       ov.zoom = r.info.zoom;
+-      console.info('[SICEP+] câmera:', r.info.label, r.info.largura + 'x' + r.info.altura,
++      console.info('[SIGEIA AVALIAÇÕES] câmera:', r.info.label, r.info.largura + 'x' + r.info.altura,
+         '(' + r.info.confianca + ')', 'zoom', r.info.zoom, 'de', r.info.zoomLimites);
+       if (r.info.zoomPiso > 1.01) {
+         avisoTemporario(`Este aparelho não deixa a câmera mais aberta que ${String(r.info.zoomPiso).replace('.', ',')}x — afaste o celular para enquadrar o cartão inteiro.`, 6000);
+@@ -217,7 +217,7 @@ export default function leitura(params) {
+       video.setAttribute('playsinline', '');
+       video.muted = true;
+       await video.play();
+-    } catch (e) { console.warn('[SICEP+] play() bloqueado:', e); }
++    } catch (e) { console.warn('[SIGEIA AVALIAÇÕES] play() bloqueado:', e); }
+ 
+     if (!stream) return;   // a câmera foi fechada enquanto o vídeo iniciava
+     const track = stream.getVideoTracks()[0];
+@@ -546,7 +546,7 @@ export default function leitura(params) {
+     try {
+       r = await processarCartao(ov.cv, imagem, { ...opcoesDeLeitura(), canvasQR: imagem.canvas || null });
+     } catch (e) {
+-      console.error('[SICEP+] processarCartao:', e);
++      console.error('[SIGEIA AVALIAÇÕES] processarCartao:', e);
+       r = { ok: false, bloqueado: true, motivo: 'erro', mensagem: 'Erro ao processar a imagem: ' + (e?.message || e) };
+     }
+     ov.processando = false;
+@@ -596,7 +596,7 @@ export default function leitura(params) {
+       const blob = await fotoEmAlta(stream);
+       if (blob) return await imagemDoArquivo(blob, MAX_LADO_FOTO);
+     } catch (e) {
+-      console.warn('[SICEP+] ImageCapture:', e);
++      console.warn('[SIGEIA AVALIAÇÕES] ImageCapture:', e);
+     }
+     const track = stream.getVideoTracks()[0];
+     if (!track || !ov.camInfo?.maxima?.largura) return quadroDoVideo(MAX_LADO_FOTO);
+@@ -672,7 +672,7 @@ export default function leitura(params) {
+     if (document.hidden) { ov.timer = setTimeout(ciclo, 1000); return; }   // aba em segundo plano: não gasta CPU
+     if (ov.passo === 'qr' && (ov.cv || typeof BarcodeDetector !== 'undefined') && !ov.processando && !ov.capturando && !ov.erro && !ov.ocupado && video.videoWidth) {
+       ov.ocupado = true;
+-      try { await analisarQuadro(); } catch (e) { console.warn('[SICEP+] leitura ao vivo:', e); } finally { ov.ocupado = false; }
++      try { await analisarQuadro(); } catch (e) { console.warn('[SIGEIA AVALIAÇÕES] leitura ao vivo:', e); } finally { ov.ocupado = false; }
+     }
+     if (ov.aberto) ov.timer = setTimeout(ciclo, 500);
+   }
+diff --git a/js/screens/login.js b/js/screens/login.js
+index 616aa4f..2c199a8 100644
+--- a/js/screens/login.js
++++ b/js/screens/login.js
+@@ -19,7 +19,7 @@ function mascararCpf(input) {
+ }
+ 
+ /**
+- * Login individual do SICEP+ com a MESMA credencial do SIGEIA+/SIDED+
++ * Login individual do SIGEIA AVALIAÇÕES com a MESMA credencial do SIGEIA+/SIDED+
+  * (login, e-mail ou CPF + senha, tabela users). Nada de cadastro novo.
+  */
+ export default function login({ aoEntrar } = {}) {
+@@ -28,7 +28,7 @@ export default function login({ aoEntrar } = {}) {
+       <aside class="login-hero">
+         <div class="login-hero-top">
+           <span class="mark lg"><img src="assets/icons/icon.svg" alt="" /></span>
+-          <span class="login-hero-name">SICEP<span>+</span></span>
++          <span class="login-hero-name">SIGEIA<span> AVALIAÇÕES</span></span>
+         </div>
+ 
+         <div class="login-hero-mid">
+@@ -45,14 +45,14 @@ export default function login({ aoEntrar } = {}) {
+           </ul>
+         </div>
+ 
+-        <div class="login-hero-foot">SICEP+ · integrado ao SIGEIA+/SIDED+</div>
++        <div class="login-hero-foot">SIGEIA AVALIAÇÕES · integrado ao SIGEIA+/SIDED+</div>
+       </aside>
+ 
+       <main class="login-panel">
+         <div class="login-card">
+           <div class="login-brand-mobile">
+             <span class="mark lg"><img src="assets/icons/icon.svg" alt="" /></span>
+-            <span class="login-hero-name">SICEP<span>+</span></span>
++            <span class="login-hero-name">SIGEIA<span> AVALIAÇÕES</span></span>
+           </div>
+ 
+           <form class="login-form" data-form novalidate>
+@@ -90,7 +90,7 @@ export default function login({ aoEntrar } = {}) {
+             </button>
+ 
+             <p class="login-note">
+-              Sua conta é a mesma do SIGEIA+/SIDED+ — não existe senha própria do SICEP+.
++              Sua conta é a mesma do SIGEIA+/SIDED+ — não existe senha própria do SIGEIA AVALIAÇÕES.
+             </p>
+           </form>
+ 
+@@ -162,7 +162,7 @@ export default function login({ aoEntrar } = {}) {
+       rotulo.textContent = 'Pronto';
+       if (typeof aoEntrar === 'function') await aoEntrar();
+     } catch (e) {
+-      console.error('[SICEP+] login', e);
++      console.error('[SIGEIA AVALIAÇÕES] login', e);
+       mostrarErro('Erro inesperado ao entrar. Tente novamente.');
+     } finally {
+       enviando = false;
+diff --git a/js/screens/resultados.js b/js/screens/resultados.js
+index 8351c0d..6a277c7 100644
+--- a/js/screens/resultados.js
++++ b/js/screens/resultados.js
+@@ -226,7 +226,7 @@ export default function resultados() {
+       const r = store.resultados().find((x) => x.id === [...st.sel][0]);
+       if (!r) return;
+       if (r.enviado_em && !window.confirm(
+-        'Esta nota já foi enviada ao SIDED+.\n\nA nova leitura altera só o resultado no SICEP+; a nota no SIDED+ não será modificada.\n\nReler o cartão?'
++        'Esta nota já foi enviada ao SIDED+.\n\nA nova leitura altera só o resultado no SIGEIA AVALIAÇÕES; a nota no SIDED+ não será modificada.\n\nReler o cartão?'
+       )) return;
+       location.hash = `#/leitura/${r.avaliacao_id}/${r.aluno_id}`;
+     });
+diff --git a/js/store.js b/js/store.js
+index 82a1c05..1f83fc0 100644
+--- a/js/store.js
++++ b/js/store.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Camada de dados — SOMENTE dados reais (Supabase)
++   SIGEIA AVALIAÇÕES · Camada de dados — SOMENTE dados reais (Supabase)
+ 
+    Não existe modo demonstração: se a sessão ou a conexão
+    falharem, a interface mostra o motivo e não preenche a tela
+@@ -201,7 +201,7 @@ export async function iniciar() {
+         falhaHabilidades = e;
+       }
+       if (falhaHabilidades) {
+-        console.warn('[SICEP+] habilidades indisponíveis, mantendo as já carregadas:', falhaHabilidades.message);
++        console.warn('[SIGEIA AVALIAÇÕES] habilidades indisponíveis, mantendo as já carregadas:', falhaHabilidades.message);
+         habilidades = db.habilidades || [];
+         // Reabriu o app agora: a memória está vazia, mas a cópia local tem a última lista boa.
+         if (!habilidades.length) {
+@@ -231,7 +231,7 @@ export async function iniciar() {
+   }
+ 
+   // A nuvem falhou: nunca apaga o que já existe localmente.
+-  console.warn('[SICEP+] Nuvem indisponível, tentando a cópia local:', falhaNuvem?.message);
++  console.warn('[SIGEIA AVALIAÇÕES] Nuvem indisponível, tentando a cópia local:', falhaNuvem?.message);
+ 
+   const copia = await offline.lerCache(usuarioId).catch(() => null);
+   if (copia) {
+@@ -257,7 +257,7 @@ export async function iniciar() {
+     return { estado, erro: null, recursos, origem };
+   }
+ 
+-  console.error('[SICEP+] Falha ao carregar dados reais:', falhaNuvem);
++  console.error('[SIGEIA AVALIAÇÕES] Falha ao carregar dados reais:', falhaNuvem);
+   estado = 'erro';
+   erro = falhaNuvem?.message || 'Falha ao carregar os dados.';
+   db = vazio();
+@@ -417,7 +417,7 @@ export function urlLogin() { return CONFIG.loginUrl; }
+ 
+ const PERFIS_PERMITIDOS = ['professor', 'admin', 'diretor', 'especialista', 'secretaria'];
+ 
+-/** Login próprio do SICEP+ com as mesmas credenciais do SIGEIA+/SIDED+. */
++/** Login próprio do SIGEIA AVALIAÇÕES com as mesmas credenciais do SIGEIA+/SIDED+. */
+ export async function entrar(identificador, senha) {
+   const login = String(identificador || '').trim();
+   if (!login || !senha) return { ok: false, erro: 'Preencha o acesso e a senha.' };
+@@ -437,7 +437,7 @@ export async function entrar(identificador, senha) {
+   if (!usuario) return { ok: false, erro: 'CPF/e-mail ou senha incorretos.' };
+ 
+   if (usuario.role && !PERFIS_PERMITIDOS.includes(usuario.role)) {
+-    return { ok: false, erro: 'O SICEP+ é exclusivo para professores e gestão escolar.' };
++    return { ok: false, erro: 'O SIGEIA AVALIAÇÕES é exclusivo para professores e gestão escolar.' };
+   }
+ 
+   const professor = await nuvem.resolverProfessor(usuario);
+@@ -1168,7 +1168,7 @@ export async function confirmarResultado(id) {
+ }
+ 
+ /**
+- * Exclui somente o resultado do SICEP+. A nota já enviada ao SIDED+ não é
++ * Exclui somente o resultado do SIGEIA AVALIAÇÕES. A nota já enviada ao SIDED+ não é
+  * apagada por aqui: notas do SIDED+ podem ter sido editadas pelo professor.
+  */
+ export async function excluirResultado(id) {
+@@ -1334,8 +1334,8 @@ export async function enviarAoSided(avaliacaoId, turmaId, resultadoIds = null) {
+           body: JSON.stringify({ enviado_sided_em: agora }),
+         });
+       } catch (e) {
+-        console.warn('[SICEP+] enviado_sided_em:', e.message);
+-        aviso = 'As notas foram gravadas no SIDED+, mas não consegui registrar o envio no SICEP+. Ao recarregar elas podem voltar como pendentes; reenviar é seguro (não duplica).';
++        console.warn('[SIGEIA AVALIAÇÕES] enviado_sided_em:', e.message);
++        aviso = 'As notas foram gravadas no SIDED+, mas não consegui registrar o envio no SIGEIA AVALIAÇÕES. Ao recarregar elas podem voltar como pendentes; reenviar é seguro (não duplica).';
+       }
+     } else {
+       aviso = 'As notas foram gravadas no SIDED+, mas o banco ainda não tem a coluna enviado_sided_em: o estado de envio não fica salvo depois de recarregar.';
+@@ -1554,7 +1554,7 @@ export async function enviarAusenciasAoSided(avaliacaoId, turmaId) {
+         { method: 'PATCH', body: JSON.stringify({ enviado_sided_em: agora }) }
+       );
+     } catch (e) {
+-      aviso = 'As ausências foram gravadas no SIDED+, mas não consegui registrar o envio no SICEP+. Reenviar é seguro (não duplica).';
++      aviso = 'As ausências foram gravadas no SIDED+, mas não consegui registrar o envio no SIGEIA AVALIAÇÕES. Reenviar é seguro (não duplica).';
+     }
+     apl.sided_avaliacao_id = r.sided_avaliacao_id;
+     const alvoAv = db.avaliacoes.find((x) => x.id === av.id);
+@@ -1714,7 +1714,7 @@ async function aplicarFilaNoEstado() {
+     });
+     await atualizarEstadoDaFila();
+   } catch (e) {
+-    console.warn('[SICEP+] fila ao abrir:', e);
++    console.warn('[SIGEIA AVALIAÇÕES] fila ao abrir:', e);
+   }
+ }
+ 
+diff --git a/js/sw.js b/js/sw.js
+index 4802ca0..e510f15 100644
+--- a/js/sw.js
++++ b/js/sw.js
+@@ -1,4 +1,4 @@
+-/* SICEP+ · Service Worker (app shell) */
++/* SIGEIA AVALIAÇÕES · Service Worker (app shell) */
+ 
+ // Suba o número a cada entrega que mude arquivos do app (força o aparelho a baixar tudo de novo).
+ const CACHE = 'sicep-v2';
+diff --git a/js/ui.js b/js/ui.js
+index 1e5391f..d5ff42a 100644
+--- a/js/ui.js
++++ b/js/ui.js
+@@ -1,5 +1,5 @@
+ /* ============================================================
+-   SICEP+ · Utilitários de interface
++   SIGEIA AVALIAÇÕES · Utilitários de interface
+    ============================================================ */
+ 
+ export function el(html) {
+diff --git a/manifest.webmanifest b/manifest.webmanifest
+index 1bebb65..7b7dd1b 100644
+--- a/manifest.webmanifest
++++ b/manifest.webmanifest
+@@ -1,7 +1,7 @@
+ {
+-  "name": "SICEP+ · Correção de provas",
+-  "short_name": "SICEP+",
+-  "description": "Sistema Inteligente de Correção Escolar de Provas por cartão de respostas.",
++  "name": "SIGEIA AVALIAÇÕES · Correção de provas",
++  "short_name": "SIGEIA AVALIAÇÕES",
++  "description": "Correção escolar de provas por cartão de respostas por cartão de respostas.",
+   "lang": "pt-BR",
+   "start_url": "./",
+   "scope": "./",
+diff --git a/sw.js b/sw.js
+index a0b69b7..fb2f304 100644
+--- a/sw.js
++++ b/sw.js
+@@ -1,7 +1,7 @@
+-/* SICEP+ · Service Worker (app shell) */
++/* SIGEIA AVALIAÇÕES · Service Worker (app shell) */
+ 
+ // Suba o número a cada entrega que mude arquivos do app (força o aparelho a baixar tudo de novo).
+-const CACHE = 'sicep-v36';
++const CACHE = 'sicep-v37';
+ 
+ // O OpenCV (~13 MB) fica em cache próprio e com versão própria: subir o CACHE acima
+ // NÃO apaga o OpenCV, então ninguém baixa 13 MB de novo a cada atualização do app.
+-- 
+2.43.0
+
